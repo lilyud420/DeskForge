@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Constraint, Layout, Position, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, List, ListItem, Paragraph},
+    widgets::{Block, List, ListItem, Paragraph, block},
 };
 
 const HEIGHT: u16 = 35;
@@ -40,12 +40,22 @@ enum InputMode {
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(file_name: Option<String>) -> Self {
+        let mut input = vec![String::new(); NUM_BLOCK];
+        let mut character_index = vec![0; NUM_BLOCK];
+        let mut block_index: usize = 0;
+
+        if let Some(name) = file_name {
+            input[0] = name;
+            character_index[0] = input[0].chars().count();
+            block_index += 1;
+        }
+
         Self {
-            character_index: vec![0; NUM_BLOCK],
-            block_index: 0,
+            character_index,
+            block_index,
             input_mode: InputMode::Normal,
-            input: vec![String::new(); NUM_BLOCK],
+            input,
             message: Vec::new(),
             exit: false,
         }
@@ -133,7 +143,8 @@ impl App {
 
     fn submit_message(&mut self) {
         self.message.push(self.current_input().clone());
-        *self.current_input_mut() = String::new();
+        // *self.current_input_mut() = String::new();
+        self.next_block();
         self.reset_cursor();
     }
 
@@ -153,8 +164,8 @@ impl App {
             InputMode::Normal => match key_event.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.exit(),
                 KeyCode::Char('i') => self.input_mode = InputMode::Insert,
-                KeyCode::Char('j') => self.next_block(),
-                KeyCode::Char('k') => self.previous_block(),
+                KeyCode::Char('j') | KeyCode::Down => self.next_block(),
+                KeyCode::Char('k') | KeyCode::Up => self.previous_block(),
                 _ => {}
             },
             InputMode::Insert if key_event.kind == KeyEventKind::Press => match key_event.code {
@@ -170,13 +181,13 @@ impl App {
         }
     }
 
-    fn is_active_block(&self, index: usize) -> bool {
+    fn _is_active_block(&self, index: usize) -> bool {
         matches!(self.input_mode, InputMode::Insert) && self.block_index == index
     }
 
     fn is_active_block_style(&self, index: usize) -> Style {
-        if self.is_active_block(index) {
-            Style::default().fg(Color::LightBlue)
+        if self.block_index == index {
+            Style::default().fg(Color::LightGreen)
         } else {
             Style::default()
         }
@@ -299,22 +310,21 @@ impl App {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
-
     let cli = Cli::parse();
 
-    if cli.new {
+    if let Some(file_name) = cli.new {
         let mut terminal = ratatui::init();
-        let result = App::new().run(&mut terminal);
+        let result = App::new(Some(file_name)).run(&mut terminal);
         ratatui::restore();
-        result
-    } else if let Some(file) = cli.edit {
-        println!("Test {}", file);
+        return result;
+    }
+
+    if let Some(file_name) = cli.edit {
         let mut terminal = ratatui::init();
-        let result = App::new().run(&mut terminal);
+        let result = App::new(Some(file_name)).run(&mut terminal);
         ratatui::restore();
-        result
+        return result;
     } else {
-        println!("Error");
         Ok(())
     }
 }
