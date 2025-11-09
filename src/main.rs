@@ -1,21 +1,34 @@
+mod cli;
+
+use clap::Parser;
+use cli::Cli;
+
+mod utils;
+use crate::utils::shrink_rect::{self, shrink};
+
 use color_eyre::{
     eyre::{Ok, Result},
     owo_colors::OwoColorize,
 };
+
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
-    layout::{Constraint, Layout, Position},
+    layout::{Constraint, Layout, Position, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, List, ListItem, Paragraph},
 };
 
+const HEIGHT: u16 = 35;
+const NUM_BLOCK: usize = 7;
+
 #[derive(Debug)]
 pub struct App {
-    input: String,
-    character_index: usize,
+    character_index: Vec<usize>,
+    block_index: usize,
     input_mode: InputMode,
+    input: Vec<String>,
     message: Vec<String>,
     exit: bool,
 }
@@ -27,65 +40,100 @@ enum InputMode {
 }
 
 impl App {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
-            input: String::new(),
-            character_index: 0,
+            character_index: vec![0; NUM_BLOCK],
+            block_index: 0,
             input_mode: InputMode::Normal,
+            input: vec![String::new(); NUM_BLOCK],
             message: Vec::new(),
             exit: false,
         }
     }
 
+    fn current_input(&self) -> &String {
+        &self.input[self.block_index]
+    }
+
+    fn current_input_mut(&mut self) -> &mut String {
+        &mut self.input[self.block_index]
+    }
+
+    fn current_cursor(&self) -> usize {
+        self.character_index[self.block_index]
+    }
+
+    fn current_cursor_mut(&mut self) -> &mut usize {
+        &mut self.character_index[self.block_index]
+    }
+
     fn move_cursor_left(&mut self) {
-        let cursor_moved_left = self.character_index.saturating_sub(1);
-        self.character_index = self.clamp_cursor(cursor_moved_left);
+        let cursor_moved_left = self.current_cursor().saturating_sub(1);
+        *self.current_cursor_mut() = self.clamp_cursor(cursor_moved_left);
     }
 
     fn move_cursor_right(&mut self) {
-        let cursor_moved_right = self.character_index.saturating_add(1);
-        self.character_index = self.clamp_cursor(cursor_moved_right);
+        let cursor_moved_right = self.current_cursor().saturating_add(1);
+        *self.current_cursor_mut() = self.clamp_cursor(cursor_moved_right);
     }
 
     fn enter_char(&mut self, new_char: char) {
         let index = self.byte_index();
-        self.input.insert(index, new_char);
+        self.current_input_mut().insert(index, new_char);
         self.move_cursor_right();
     }
 
     fn byte_index(&self) -> usize {
-        self.input
+        self.current_input()
             .char_indices()
             .map(|(i, _)| i)
-            .nth(self.character_index)
-            .unwrap_or(self.input.len())
+            .nth(self.current_cursor())
+            .unwrap_or(self.current_input().len())
     }
 
     fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
-        new_cursor_pos.clamp(0, self.input.chars().count())
+        new_cursor_pos.clamp(0, self.current_input().chars().count())
     }
 
     fn delete_char(&mut self) {
-        let is_not_cursor_leftmost = self.character_index != 0;
+        let is_not_cursor_leftmost = self.current_cursor() != 0;
         if is_not_cursor_leftmost {
-            let current_index = self.character_index;
+            let current_index = self.current_cursor();
             let from_left_to_current_index = current_index - 1;
 
-            let before_char_to_delete = self.input.chars().take(from_left_to_current_index);
-            let after_char_to_delete = self.input.chars().skip(current_index);
+            let before_char_to_delete = self
+                .current_input()
+                .chars()
+                .take(from_left_to_current_index);
+            let after_char_to_delete = self.current_input().chars().skip(current_index);
 
-            self.input = before_char_to_delete.chain(after_char_to_delete).collect();
+            let new_string: String = before_char_to_delete.chain(after_char_to_delete).collect();
+            *self.current_input_mut() = new_string;
             self.move_cursor_left();
         }
     }
 
     fn reset_cursor(&mut self) {
-        self.character_index = 0;
+        *self.current_cursor_mut() = 0;
+    }
+
+    fn next_block(&mut self) {
+        if self.block_index == 6 {
+            return;
+        }
+        self.block_index += 1;
+    }
+
+    fn previous_block(&mut self) {
+        if self.block_index == 0 {
+            return;
+        }
+        self.block_index -= 1;
     }
 
     fn submit_message(&mut self) {
-        self.message.push(self.input.clone());
-        self.input.clear();
+        self.message.push(self.current_input().clone());
+        *self.current_input_mut() = String::new();
         self.reset_cursor();
     }
 
@@ -105,6 +153,8 @@ impl App {
             InputMode::Normal => match key_event.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.exit(),
                 KeyCode::Char('i') => self.input_mode = InputMode::Insert,
+                KeyCode::Char('j') => self.next_block(),
+                KeyCode::Char('k') => self.previous_block(),
                 _ => {}
             },
             InputMode::Insert if key_event.kind == KeyEventKind::Press => match key_event.code {
@@ -117,6 +167,18 @@ impl App {
                 _ => {}
             },
             InputMode::Insert => {}
+        }
+    }
+
+    fn is_active_block(&self, index: usize) -> bool {
+        matches!(self.input_mode, InputMode::Insert) && self.block_index == index
+    }
+
+    fn is_active_block_style(&self, index: usize) -> Style {
+        if self.is_active_block(index) {
+            Style::default().fg(Color::LightBlue)
+        } else {
+            Style::default()
         }
     }
 
@@ -134,13 +196,16 @@ impl App {
     }
 
     fn draw(&self, frame: &mut Frame) {
+        let area;
+
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(3),
-        ]);
+        ])
+        .horizontal_margin(20);
 
-        let [instructions_area, title_area, desktop_name] = vertical.areas(frame.area());
+        let [_instructions_area, outline_area, _desktop_name] = vertical.areas(frame.area());
 
         let (msg, _style) = match self.input_mode {
             InputMode::Normal => (
@@ -158,34 +223,98 @@ impl App {
                 Line::from(Line::from(vec![" Insert: ".into(), "<I> ".white().bold()]))
             }
 
-            InputMode::Insert => {
-                Line::from(Line::from(vec![" Normal: ".into(), "<Esc> ".white().bold()]))
-            }
+            InputMode::Insert => Line::from(Line::from(vec![
+                " Normal: ".into(),
+                "<Esc> ".white().bold(),
+            ])),
         }
         .centered();
 
-        let instructions =
-            Line::from(Line::from(vec![" Quit ".into(), "<Q> ".white().bold()]).centered());
-
-        frame.render_widget(
-            Block::bordered()
-                .title_bottom(msg)
-                .title_bottom(vim_mode)
-                .title_bottom(instructions)
-                .title(Line::from(
-                    " DeskForge - Create Launcher ".bold().into_centered_line(),
-                )),
-            title_area,
+        let instructions = Line::from(
+            Line::from(vec![
+                " Next ".into(),
+                "<J> ".white().bold(),
+                "─".into(),
+                " Previous ".into(),
+                "<K> ".white().bold(),
+                "─".into(),
+                " Quit ".into(),
+                "<Q> ".white().bold(),
+            ])
+            .centered(),
         );
+
+        let outline_block = Block::bordered()
+            .title_bottom(msg)
+            .title_bottom(vim_mode)
+            .title_bottom(instructions)
+            .title(Line::from(
+                " DeskForge - Create Launcher ".bold().into_centered_line(),
+            ));
+
+        frame.render_widget(&outline_block, outline_area);
+
+        // Desktop name block
+        let name_style = self.is_active_block_style(0);
+        let input = Paragraph::new(self.input[0].as_str())
+            .style(name_style)
+            .block(Block::bordered().title("Name"));
+
+        let inner = outline_block.inner(outline_area);
+        let input_area = shrink(inner, 0, 0, 0, HEIGHT);
+        frame.render_widget(input, input_area);
+
+        // Exec block
+        let exec_style = self.is_active_block_style(1);
+        let exec = Paragraph::new(self.input[1].as_str())
+            .style(exec_style)
+            .block(Block::bordered().title("Exec"));
+
+        let inner = outline_block.inner(outline_area);
+        let exec_area = shrink(inner, 0, 3, 0, HEIGHT);
+        frame.render_widget(exec, exec_area);
+
+        // Insert mode
+        match self.block_index {
+            0 => area = input_area,
+            1 => area = exec_area,
+            2 => todo!(),
+            3 => todo!(),
+            4 => todo!(),
+            5 => todo!(),
+            6 => todo!(),
+            _ => area = input_area,
+        }
+
+        match self.input_mode {
+            InputMode::Normal => {}
+            #[allow(clippy::cast_possible_truncation)]
+            InputMode::Insert => frame.set_cursor_position(Position::new(
+                area.x + self.character_index[self.block_index] as u16 + 1,
+                area.y + 1,
+            )),
+        }
     }
 }
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let mut terminal = ratatui::init();
-    let result = App::new().run(&mut terminal);
+    let cli = Cli::parse();
 
-    ratatui::restore();
-    result
+    if cli.new {
+        let mut terminal = ratatui::init();
+        let result = App::new().run(&mut terminal);
+        ratatui::restore();
+        result
+    } else if let Some(file) = cli.edit {
+        println!("Test {}", file);
+        let mut terminal = ratatui::init();
+        let result = App::new().run(&mut terminal);
+        ratatui::restore();
+        result
+    } else {
+        println!("Error");
+        Ok(())
+    }
 }
