@@ -4,7 +4,7 @@ use clap::Parser;
 use cli::Cli;
 
 mod utils;
-use crate::utils::shrink_rect::{self, shrink};
+use crate::utils::shrink_rect::shrink;
 
 use color_eyre::{
     eyre::{Ok, Result},
@@ -13,14 +13,14 @@ use color_eyre::{
 
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout, Position, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, List, ListItem, Paragraph, block},
 };
+use tui_checkbox::Checkbox;
 
-const HEIGHT: u16 = 35;
 const NUM_BLOCK: usize = 7;
 
 #[derive(Debug)]
@@ -30,6 +30,7 @@ pub struct App {
     input_mode: InputMode,
     input: Vec<String>,
     message: Vec<String>,
+    checkbox: bool,
     exit: bool,
 }
 
@@ -45,7 +46,9 @@ impl App {
         let mut character_index = vec![0; NUM_BLOCK];
         let mut block_index: usize = 0;
 
-        if let Some(name) = file_name {
+        if let Some(name) = file_name
+            && name != ""
+        {
             input[0] = name;
             character_index[0] = input[0].chars().count();
             block_index += 1;
@@ -54,6 +57,7 @@ impl App {
         Self {
             character_index,
             block_index,
+            checkbox: false,
             input_mode: InputMode::Normal,
             input,
             message: Vec::new(),
@@ -153,19 +157,30 @@ impl App {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 self.handle_key_input(key_event)
             }
+            Event::Resize(_, _) => {}
             _ => {}
         };
-
         Ok(())
     }
 
     fn handle_key_input(&mut self, key_event: KeyEvent) {
         match self.input_mode {
             InputMode::Normal => match key_event.code {
-                KeyCode::Esc | KeyCode::Char('q') => self.exit(),
-                KeyCode::Char('i') => self.input_mode = InputMode::Insert,
+                KeyCode::Char('q') => self.exit(),
+                KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                   self.exit(); 
+                },
+                KeyCode::Char('i') => match self.block_index {
+                    4 => self.checkbox(),
+                    _ => self.input_mode = InputMode::Insert,
+                },
                 KeyCode::Char('j') | KeyCode::Down => self.next_block(),
                 KeyCode::Char('k') | KeyCode::Up => self.previous_block(),
+                KeyCode::Enter => {
+                    if self.block_index == 4 {
+                        self.checkbox();
+                    }
+                }
                 _ => {}
             },
             InputMode::Insert if key_event.kind == KeyEventKind::Press => match key_event.code {
@@ -191,6 +206,10 @@ impl App {
         } else {
             Style::default()
         }
+    }
+
+    fn checkbox(&mut self) {
+        self.checkbox = !self.checkbox;
     }
 
     fn exit(&mut self) {
@@ -265,45 +284,118 @@ impl App {
 
         frame.render_widget(&outline_block, outline_area);
 
+        let inner = outline_block.inner(outline_area);
+        let [required_area, optional_area] =
+            *Layout::vertical([Constraint::Length(11), Constraint::Min(0)]).split(inner)
+        else {
+            unreachable!()
+        };
+
+        // Require & Optional area
+        let requireed_block = Block::bordered().title("Required");
+        let optional_block = Block::bordered().title("Optional");
+
+        // Require & Block inner
+        let required_inner = requireed_block.inner(required_area);
+        let [name_area, exec_area, icon_area] = *Layout::vertical([
+            Constraint::Length(3), // Name
+            Constraint::Length(3), // Exec
+            Constraint::Length(3), // Icon
+        ])
+        .split(required_inner) else {
+            unreachable!()
+        };
+
+        let optional_inner = optional_block.inner(optional_area);
+        let [comment_area, terminal_area, type_area, category_area] = *Layout::vertical([
+            Constraint::Length(2), // Comment
+            Constraint::Length(2), // Terminal
+            Constraint::Length(2), // Type
+            Constraint::Length(2), // Category
+        ])
+        .split(optional_inner) else {
+            unreachable!()
+        };
+
+        frame.render_widget(requireed_block, required_area);
+        frame.render_widget(optional_block, optional_area);
+
         // Desktop name block
         let name_style = self.is_active_block_style(0);
-        let input = Paragraph::new(self.input[0].as_str())
+        let name = Paragraph::new(self.input[0].as_str())
             .style(name_style)
             .block(Block::bordered().title("Name"));
-
-        let inner = outline_block.inner(outline_area);
-        let input_area = shrink(inner, 0, 0, 0, HEIGHT);
-        frame.render_widget(input, input_area);
-
+        frame.render_widget(name, name_area);
+        
         // Exec block
         let exec_style = self.is_active_block_style(1);
         let exec = Paragraph::new(self.input[1].as_str())
             .style(exec_style)
             .block(Block::bordered().title("Exec"));
-
-        let inner = outline_block.inner(outline_area);
-        let exec_area = shrink(inner, 0, 3, 0, HEIGHT);
         frame.render_widget(exec, exec_area);
+
+        // Icon block
+        let icon_style = self.is_active_block_style(2);
+        let icon = Paragraph::new(self.input[2].as_str())
+            .style(icon_style)
+            .block(Block::bordered().title("Icon"));
+        frame.render_widget(icon, icon_area);
+
+        // Comment block
+        // let comment_style = self.is_active_block_style(3);
+        // let comment = Paragraph::new(self.input[3].as_str())
+        //     .style(comment_style)
+        //     .block(Block::bordered().title("Comment"));
+        let comment_style = self.is_active_block_style(3);
+        let comment =
+            Paragraph::new(format!("Comment: [ {} ]", self.input[3].as_str())).style(comment_style);
+        frame.render_widget(comment, comment_area);
+
+        // Terminal block
+        let terminal_style = self.is_active_block_style(4);
+        // let terminal = Checkbox::new("Terminal", self.checkbox)
+        //     .checked_symbol("[X]")
+        //     .unchecked_symbol("[ ]")
+        //     .style(terminal_style);
+        let terminal_label = if self.checkbox {
+            "Terminal: [ X ]"
+        } else {
+            "Terminal: [   ]"
+        };
+        let terminal = Paragraph::new(terminal_label).style(terminal_style);
+        frame.render_widget(terminal, terminal_area);
 
         // Insert mode
         match self.block_index {
-            0 => area = input_area,
+            0 => area = name_area,
             1 => area = exec_area,
-            2 => todo!(),
-            3 => todo!(),
-            4 => todo!(),
+            2 => area = icon_area,
+            3 => area = comment_area,
+            4 => return,
             5 => todo!(),
             6 => todo!(),
-            _ => area = input_area,
+            _ => area = name_area,
         }
 
         match self.input_mode {
             InputMode::Normal => {}
-            #[allow(clippy::cast_possible_truncation)]
-            InputMode::Insert => frame.set_cursor_position(Position::new(
-                area.x + self.character_index[self.block_index] as u16 + 1,
-                area.y + 1,
-            )),
+            InputMode::Insert => {
+                // This code is shit
+                let (area_x, area_y): (u16, u16) = if self.block_index >= 3 {
+                    (10, 0)
+                } else {
+                    (0, 1)
+                };
+
+                let cursor_x = area.x + area_x;
+                let cursor_y = area.y.saturating_add(area_y);
+
+                #[allow(clippy::cast_possible_truncation)]
+                frame.set_cursor_position(Position::new(
+                    cursor_x + self.character_index[self.block_index] as u16 + 1,
+                    cursor_y,
+                ))
+            }
         }
     }
 }
@@ -312,7 +404,8 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
 
-    if let Some(file_name) = cli.new {
+    if let Some(name) = cli.new {
+        let file_name = name.unwrap_or_default();
         let mut terminal = ratatui::init();
         let result = App::new(Some(file_name)).run(&mut terminal);
         ratatui::restore();
