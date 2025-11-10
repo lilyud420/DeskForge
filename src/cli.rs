@@ -5,7 +5,7 @@ use clap::{Parser};
 pub struct Cli {
     /// Create a new launcher
     #[arg(short = 'n', long = "new", value_name = "FILE_NAME", num_args = 0..=1)]
-    pub new: Option<String>,
+    pub new: Option<Option<String>>,
     
     /// Edit an existing launcher
     #[arg(short = 'e', long = "edit", value_name = "FILE_NAME", num_args= 0..=1)]
