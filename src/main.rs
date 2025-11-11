@@ -19,16 +19,15 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, List, ListItem, Paragraph, block},
 };
-use tui_checkbox::Checkbox;
+use tui_input::{Input, backend::crossterm::EventHandler};
 
 const NUM_BLOCK: usize = 7;
 
 #[derive(Debug)]
 pub struct App {
-    character_index: Vec<usize>,
     block_index: usize,
     input_mode: InputMode,
-    input: Vec<String>,
+    input: Vec<Input>,
     message: Vec<String>,
     checkbox: bool,
     exit: bool,
@@ -42,20 +41,17 @@ enum InputMode {
 
 impl App {
     fn new(file_name: Option<String>) -> Self {
-        let mut input = vec![String::new(); NUM_BLOCK];
-        let mut character_index = vec![0; NUM_BLOCK];
+        let mut input = vec![Input::default(); NUM_BLOCK];
         let mut block_index: usize = 0;
 
         if let Some(name) = file_name
             && name != ""
         {
-            input[0] = name;
-            character_index[0] = input[0].chars().count();
+            input[0] = Input::from(name);
             block_index += 1;
         }
 
         Self {
-            character_index,
             block_index,
             checkbox: false,
             input_mode: InputMode::Normal,
@@ -63,72 +59,6 @@ impl App {
             message: Vec::new(),
             exit: false,
         }
-    }
-
-    fn current_input(&self) -> &String {
-        &self.input[self.block_index]
-    }
-
-    fn current_input_mut(&mut self) -> &mut String {
-        &mut self.input[self.block_index]
-    }
-
-    fn current_cursor(&self) -> usize {
-        self.character_index[self.block_index]
-    }
-
-    fn current_cursor_mut(&mut self) -> &mut usize {
-        &mut self.character_index[self.block_index]
-    }
-
-    fn move_cursor_left(&mut self) {
-        let cursor_moved_left = self.current_cursor().saturating_sub(1);
-        *self.current_cursor_mut() = self.clamp_cursor(cursor_moved_left);
-    }
-
-    fn move_cursor_right(&mut self) {
-        let cursor_moved_right = self.current_cursor().saturating_add(1);
-        *self.current_cursor_mut() = self.clamp_cursor(cursor_moved_right);
-    }
-
-    fn enter_char(&mut self, new_char: char) {
-        let index = self.byte_index();
-        self.current_input_mut().insert(index, new_char);
-        self.move_cursor_right();
-    }
-
-    fn byte_index(&self) -> usize {
-        self.current_input()
-            .char_indices()
-            .map(|(i, _)| i)
-            .nth(self.current_cursor())
-            .unwrap_or(self.current_input().len())
-    }
-
-    fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
-        new_cursor_pos.clamp(0, self.current_input().chars().count())
-    }
-
-    fn delete_char(&mut self) {
-        let is_not_cursor_leftmost = self.current_cursor() != 0;
-        if is_not_cursor_leftmost {
-            let current_index = self.current_cursor();
-            let from_left_to_current_index = current_index - 1;
-
-            let before_char_to_delete = self
-                .current_input()
-                .chars()
-                .take(from_left_to_current_index);
-            let after_char_to_delete = self.current_input().chars().skip(current_index);
-
-            let new_string: String = before_char_to_delete.chain(after_char_to_delete).collect();
-            *self.current_input_mut() = new_string;
-            self.move_cursor_left();
-        }
-    }
-
-    fn reset_cursor(&mut self) {
-        *self.current_cursor_mut() = 0;
     }
 
     fn next_block(&mut self) {
@@ -146,13 +76,12 @@ impl App {
     }
 
     fn submit_message(&mut self) {
-        self.message.push(self.current_input().clone());
-        // *self.current_input_mut() = String::new();
+        self.message
+            .push(self.input[self.block_index].value().to_string());
         self.next_block();
-        self.reset_cursor();
     }
 
-    fn hand_events(&mut self) -> Result<()> {
+    fn handle_event(&mut self) -> Result<()> {
         match event::read()? {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 self.handle_key_input(key_event)
@@ -166,10 +95,12 @@ impl App {
     fn handle_key_input(&mut self, key_event: KeyEvent) {
         match self.input_mode {
             InputMode::Normal => match key_event.code {
-                KeyCode::Char('q') => self.exit(),
+                KeyCode::Char('q') => {
+                    self.exit();
+                }
                 KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                   self.exit(); 
-                },
+                    self.exit();
+                }
                 KeyCode::Char('i') => match self.block_index {
                     4 => self.checkbox(),
                     _ => self.input_mode = InputMode::Insert,
@@ -183,16 +114,15 @@ impl App {
                 }
                 _ => {}
             },
-            InputMode::Insert if key_event.kind == KeyEventKind::Press => match key_event.code {
-                KeyCode::Enter => self.submit_message(),
-                KeyCode::Char(to_insert) => self.enter_char(to_insert),
-                KeyCode::Backspace => self.delete_char(),
-                KeyCode::Left => self.move_cursor_left(),
-                KeyCode::Right => self.move_cursor_right(),
-                KeyCode::Esc => self.input_mode = InputMode::Normal,
-                _ => {}
-            },
-            InputMode::Insert => {}
+            InputMode::Insert => {
+                self.input[self.block_index].handle_event(&Event::Key(key_event));
+                if key_event.code == KeyCode::Esc {
+                    self.input_mode = InputMode::Normal;
+                }
+                if key_event.code == KeyCode::Enter {
+                    self.submit_message();
+                }
+            }
         }
     }
 
@@ -219,7 +149,7 @@ impl App {
     fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
-            self.hand_events()?;
+            self.handle_event()?;
         }
 
         Ok(())
@@ -322,33 +252,33 @@ impl App {
 
         // Desktop name block
         let name_style = self.is_active_block_style(0);
-        let name = Paragraph::new(self.input[0].as_str())
+        let name = Paragraph::new(self.input[0].value())
             .style(name_style)
             .block(Block::bordered().title("Name"));
         frame.render_widget(name, name_area);
-        
+
         // Exec block
         let exec_style = self.is_active_block_style(1);
-        let exec = Paragraph::new(self.input[1].as_str())
+        let exec = Paragraph::new(self.input[1].value())
             .style(exec_style)
             .block(Block::bordered().title("Exec"));
         frame.render_widget(exec, exec_area);
 
         // Icon block
         let icon_style = self.is_active_block_style(2);
-        let icon = Paragraph::new(self.input[2].as_str())
+        let icon = Paragraph::new(self.input[2].value())
             .style(icon_style)
             .block(Block::bordered().title("Icon"));
         frame.render_widget(icon, icon_area);
 
         // Comment block
         // let comment_style = self.is_active_block_style(3);
-        // let comment = Paragraph::new(self.input[3].as_str())
+        // let comment = Paragraph::new(self.input[3].value())
         //     .style(comment_style)
         //     .block(Block::bordered().title("Comment"));
         let comment_style = self.is_active_block_style(3);
         let comment =
-            Paragraph::new(format!("Comment: [ {} ]", self.input[3].as_str())).style(comment_style);
+            Paragraph::new(format!("Comment: [ {} ]", self.input[3].value())).style(comment_style);
         frame.render_widget(comment, comment_area);
 
         // Terminal block
@@ -392,7 +322,7 @@ impl App {
 
                 #[allow(clippy::cast_possible_truncation)]
                 frame.set_cursor_position(Position::new(
-                    cursor_x + self.character_index[self.block_index] as u16 + 1,
+                    cursor_x + self.input[self.block_index].visual_cursor() as u16 + 1,
                     cursor_y,
                 ))
             }
