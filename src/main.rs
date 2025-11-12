@@ -21,14 +21,48 @@ use ratatui::{
 };
 use tui_input::{Input, backend::crossterm::EventHandler};
 
-const NUM_BLOCK: usize = 7;
+use std::{
+    fmt::format, fs::{self, File, OpenOptions}, io::{self, BufRead, BufReader, Write}, path::{Path, PathBuf}, str::RSplitTerminator
+};
+
+const NUM_BLOCK: usize = 10;
+
+const IDX_NAME: usize = 0;
+const IDX_EXEC: usize = 1;
+const IDX_ICON: usize = 2;
+const IDX_COMMAND: usize = 3;
+const IDX_COMMENT: usize = 4;
+const IDX_TERMINAL: usize = 5;
+const IDX_TYPE: usize = 6;
+const IDX_CATEGORY: usize = 7;
+const IDX_SAVE: usize = 8;
+const IDX_CANCEL: usize = 9;
+
+/*
+ * 0: Name
+ * 1: Exec
+ * 2: Icon
+ * 3: Command
+ * 4: Comment
+ * 5: Terminal
+ * 6: Type
+ * 7: Category
+ * 8: Save
+ * 9: Cancel
+ */
 
 #[derive(Debug)]
 pub struct App {
-    block_index: usize,
     input_mode: InputMode,
     input: Vec<Input>,
-    message: Vec<String>,
+    last_key: Option<KeyCode>,
+
+    dropdown_open: bool,
+    dropdown_options: Vec<&'static str>,
+    dropdown_selected: usize,
+    dropdown_index: Option<usize>,
+
+    block_index: usize,
     checkbox: bool,
     exit: bool,
 }
@@ -44,6 +78,9 @@ impl App {
         let mut input = vec![Input::default(); NUM_BLOCK];
         let mut block_index: usize = 0;
 
+        input[IDX_TYPE] = Input::from("Application");
+        input[IDX_CATEGORY] = Input::from("None");
+
         if let Some(name) = file_name
             && name != ""
         {
@@ -53,32 +90,51 @@ impl App {
 
         Self {
             block_index,
-            checkbox: false,
             input_mode: InputMode::Normal,
             input,
-            message: Vec::new(),
+
+            dropdown_open: false,
+            dropdown_options: Vec::new(),
+            dropdown_selected: 0,
+            dropdown_index: None,
+
+            last_key: None,
+            checkbox: false,
             exit: false,
         }
     }
 
     fn next_block(&mut self) {
-        if self.block_index == 6 {
+        if self.block_index == IDX_CANCEL {
             return;
         }
         self.block_index += 1;
     }
 
     fn previous_block(&mut self) {
-        if self.block_index == 0 {
+        // Name
+        if self.block_index == IDX_NAME {
             return;
         }
         self.block_index -= 1;
     }
 
     fn submit_message(&mut self) {
-        self.message
-            .push(self.input[self.block_index].value().to_string());
+        if self.block_index == IDX_CANCEL {
+            self.exit();
+        }
+        if self.block_index == IDX_TERMINAL {
+            self.checkbox();
+        }
         self.next_block();
+    }
+
+    fn open_dropdown(&mut self, index: usize, options: Vec<&'static str>) {
+        self.dropdown_open = true;
+        self.dropdown_options = options;
+        self.dropdown_selected = 0;
+        self.dropdown_index = Some(index);
+        self.input[index] = Input::from(self.dropdown_options[0]);
     }
 
     fn handle_event(&mut self) -> Result<()> {
@@ -95,30 +151,134 @@ impl App {
     fn handle_key_input(&mut self, key_event: KeyEvent) {
         match self.input_mode {
             InputMode::Normal => match key_event.code {
-                KeyCode::Char('q') => {
-                    self.exit();
-                }
                 KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.exit();
                 }
-                KeyCode::Char('i') => match self.block_index {
-                    4 => self.checkbox(),
-                    _ => self.input_mode = InputMode::Insert,
-                },
-                KeyCode::Char('j') | KeyCode::Down => self.next_block(),
-                KeyCode::Char('k') | KeyCode::Up => self.previous_block(),
-                KeyCode::Enter => {
-                    if self.block_index == 4 {
-                        self.checkbox();
+
+                // Vim keys
+                KeyCode::Char('g') => {
+                    if let Some(KeyCode::Char('g')) = self.last_key {
+                        self.block_index = IDX_NAME;
+                        self.last_key = None;
+                    } else {
+                        self.last_key = Some(KeyCode::Char('g'));
                     }
                 }
-                _ => {}
-            },
-            InputMode::Insert => {
-                self.input[self.block_index].handle_event(&Event::Key(key_event));
-                if key_event.code == KeyCode::Esc {
-                    self.input_mode = InputMode::Normal;
+                KeyCode::Char('G') => {
+                    if let Some(KeyCode::Char('g')) = self.last_key {
+                        self.block_index = IDX_SAVE;
+                    }
+                    self.block_index = IDX_SAVE;
+                    self.last_key = None;
                 }
+                KeyCode::Char('d') => {
+                    if let Some(KeyCode::Char('d')) = self.last_key {
+                        self.input[self.block_index].value_and_reset();
+                        self.last_key = None;
+                    } else {
+                        self.last_key = Some(KeyCode::Char('d'));
+                    }
+                }
+
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.next_block();
+                }
+
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.previous_block();
+                }
+
+                KeyCode::Char('q') => {
+                    self.exit();
+                }
+
+                KeyCode::Char('i') => match self.block_index {
+                    IDX_TERMINAL => self.checkbox(),
+                    IDX_TYPE => {
+                        self.open_dropdown(
+                            IDX_TYPE,
+                            vec!["Application", "Programming", "Utility", "Game", "Other"],
+                        );
+                        self.input_mode = InputMode::Insert;
+                    }
+
+                    IDX_CATEGORY => {
+                        self.open_dropdown(
+                            IDX_CATEGORY,
+                            vec![
+                                "None",
+                                "AudioVideo",
+                                "Audio",
+                                "Video",
+                                "Development",
+                                "Education",
+                                "Graphics",
+                                "Network",
+                                "Office",
+                                "Science",
+                                "Settings",
+                                "System",
+                            ],
+                        );
+                        self.input_mode = InputMode::Insert;
+                    }
+                    _ => self.input_mode = InputMode::Insert,
+                },
+
+                KeyCode::Enter => match self.block_index {
+                    IDX_SAVE => {
+                        let file_name = format!(
+                            "{}.desktop",
+                            self.input[IDX_NAME].value()
+                        );
+                        self.save_as_desktop(&file_name).expect("CANNOT SAVE!");
+                        self.exit();
+                    }
+                    _ => {
+                        self.checkbox();
+                        self.submit_message();
+                    }
+                },
+
+                _ => self.last_key = None,
+            },
+
+            InputMode::Insert => {
+                if self.block_index != IDX_TYPE && self.block_index != IDX_CATEGORY {
+                    self.input[self.block_index].handle_event(&Event::Key(key_event));
+                }
+
+                // tHIS IS A PIECE OF SHIT, HELP M,E
+                if let Some(idx) = self.dropdown_index {
+                    if key_event.code == KeyCode::Down || key_event.code == KeyCode::Char('j') {
+                        self.dropdown_selected =
+                            (self.dropdown_selected + 1) % self.dropdown_options.len();
+                        self.input[idx] =
+                            Input::from(self.dropdown_options[self.dropdown_selected]);
+                    }
+                    if key_event.code == KeyCode::Up || key_event.code == KeyCode::Char('k') {
+                        self.dropdown_selected = self.dropdown_selected.saturating_sub(1);
+                        self.input[idx] =
+                            Input::from(self.dropdown_options[self.dropdown_selected]);
+                    }
+                    if key_event.code == KeyCode::Enter || key_event.code == KeyCode::Char('i') {
+                        self.dropdown_open = false;
+                        self.dropdown_index = None;
+                        self.submit_message();
+                        self.input_mode = InputMode::Normal;
+                    }
+                }
+
+                if key_event.code == KeyCode::Esc {
+                    match self.block_index {
+                        IDX_TYPE | IDX_CATEGORY => {
+                            self.dropdown_open = false;
+                            self.dropdown_index = None;
+                        }
+                        _ => self.input_mode = InputMode::Normal,
+                    }
+                }
+
                 if key_event.code == KeyCode::Enter {
                     self.submit_message();
                 }
@@ -131,7 +291,9 @@ impl App {
     }
 
     fn is_active_block_style(&self, index: usize) -> Style {
-        if self.block_index == index {
+        if self.block_index == index && index == IDX_CANCEL {
+            Style::default().fg(Color::LightRed)
+        } else if self.block_index == index {
             Style::default().fg(Color::LightGreen)
         } else {
             Style::default()
@@ -144,6 +306,47 @@ impl App {
 
     fn exit(&mut self) {
         self.exit = true;
+    }
+
+    fn save_as_desktop(&self, file_name: &str) -> Result<()> {
+        // let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")) ;
+        let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+        path.push("applications");
+        // fs::create_dir_all(&path)?;
+        
+        path.push(file_name);
+        
+        let mut file = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(&path)?;
+        
+        writeln!(file, "[Desktop Entry]")?;
+        writeln!(file, "Name={}", self.input[IDX_NAME])?;
+        writeln!(
+            file,
+            "Exec={} {}",
+            self.input[IDX_COMMAND], self.input[IDX_EXEC]
+        )?;
+        writeln!(file, "Icon={}", self.input[IDX_ICON])?;
+        writeln!(file, "Comment={}", self.input[IDX_COMMENT])?;
+        writeln!(
+            file,
+            "Terminal={}",
+            if self.checkbox { "true" } else { "false" }
+        )?;
+        writeln!(file, "Type={}", self.input[IDX_TYPE])?;
+        writeln!(
+            file,
+            "Category={}",
+            if self.input[IDX_CATEGORY].value().eq("None") {
+                ""
+            } else {
+                self.input[IDX_CATEGORY].value()
+            }
+        )?;
+        Ok(())
     }
 
     fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
@@ -215,9 +418,12 @@ impl App {
         frame.render_widget(&outline_block, outline_area);
 
         let inner = outline_block.inner(outline_area);
-        let [required_area, optional_area] =
-            *Layout::vertical([Constraint::Length(11), Constraint::Min(0)]).split(inner)
-        else {
+        let [required_area, optional_area, button_area] = *Layout::vertical([
+            Constraint::Length(11),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
+        .split(inner) else {
             unreachable!()
         };
 
@@ -237,73 +443,180 @@ impl App {
         };
 
         let optional_inner = optional_block.inner(optional_area);
-        let [comment_area, terminal_area, type_area, category_area] = *Layout::vertical([
+        let [
+            command_area,
+            comment_area,
+            terminal_area,
+            type_area,
+            category_area,
+        ] = *Layout::vertical([
+            Constraint::Length(2), // Command
             Constraint::Length(2), // Comment
             Constraint::Length(2), // Terminal
             Constraint::Length(2), // Type
             Constraint::Length(2), // Category
         ])
-        .split(optional_inner) else {
+        .split(optional_inner)
+        else {
             unreachable!()
         };
 
         frame.render_widget(requireed_block, required_area);
         frame.render_widget(optional_block, optional_area);
 
+        // Button layout
+        let buttons_area = Layout::horizontal([
+            Constraint::Percentage(40),
+            Constraint::Length(20),
+            Constraint::Length(20),
+            Constraint::Percentage(40),
+        ])
+        .split(button_area);
+
         // Desktop name block
-        let name_style = self.is_active_block_style(0);
-        let name = Paragraph::new(self.input[0].value())
+        let name_style = self.is_active_block_style(IDX_NAME);
+        let name = Paragraph::new(self.input[IDX_NAME].value())
             .style(name_style)
-            .block(Block::bordered().title("Name"));
+            .block(Block::bordered().title("Name"))
+            .add_modifier(Modifier::BOLD);
         frame.render_widget(name, name_area);
 
         // Exec block
-        let exec_style = self.is_active_block_style(1);
-        let exec = Paragraph::new(self.input[1].value())
+        let exec_style = self.is_active_block_style(IDX_EXEC);
+        let exec = Paragraph::new(self.input[IDX_EXEC].value())
             .style(exec_style)
-            .block(Block::bordered().title("Exec"));
+            .block(Block::bordered().title("Exec"))
+            .add_modifier(Modifier::BOLD);
         frame.render_widget(exec, exec_area);
 
         // Icon block
-        let icon_style = self.is_active_block_style(2);
-        let icon = Paragraph::new(self.input[2].value())
+        let icon_style = self.is_active_block_style(IDX_ICON);
+        let icon = Paragraph::new(self.input[IDX_ICON].value())
             .style(icon_style)
-            .block(Block::bordered().title("Icon"));
+            .block(Block::bordered().title("Icon"))
+            .add_modifier(Modifier::BOLD);
         frame.render_widget(icon, icon_area);
 
+        // Command block
+        let command_style = self.is_active_block_style(IDX_COMMAND);
+        let command = Paragraph::new(format!("Command: [ {}  ]", self.input[IDX_COMMAND].value()))
+            .style(command_style)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(command, command_area);
+
         // Comment block
-        // let comment_style = self.is_active_block_style(3);
-        // let comment = Paragraph::new(self.input[3].value())
-        //     .style(comment_style)
-        //     .block(Block::bordered().title("Comment"));
-        let comment_style = self.is_active_block_style(3);
-        let comment =
-            Paragraph::new(format!("Comment: [ {} ]", self.input[3].value())).style(comment_style);
+        let comment_style = self.is_active_block_style(IDX_COMMENT);
+        let comment = Paragraph::new(format!("Comment: [ {}  ]", self.input[IDX_COMMENT].value()))
+            .style(comment_style)
+            .add_modifier(Modifier::BOLD);
         frame.render_widget(comment, comment_area);
 
         // Terminal block
-        let terminal_style = self.is_active_block_style(4);
-        // let terminal = Checkbox::new("Terminal", self.checkbox)
-        //     .checked_symbol("[X]")
-        //     .unchecked_symbol("[ ]")
-        //     .style(terminal_style);
+        let terminal_style = self.is_active_block_style(IDX_TERMINAL);
         let terminal_label = if self.checkbox {
             "Terminal: [ X ]"
         } else {
             "Terminal: [   ]"
         };
-        let terminal = Paragraph::new(terminal_label).style(terminal_style);
+        let terminal = Paragraph::new(terminal_label)
+            .style(terminal_style)
+            .add_modifier(Modifier::BOLD);
         frame.render_widget(terminal, terminal_area);
+
+        // Buttons
+        let save_style = self.is_active_block_style(IDX_SAVE);
+        let save_btn = Paragraph::new("[ Save ]")
+            .style(save_style)
+            .add_modifier(Modifier::BOLD)
+            .alignment(ratatui::layout::Alignment::Center);
+
+        let cancel_style = self.is_active_block_style(IDX_CANCEL);
+        let cancel_btn = Paragraph::new("[ Cancel ]")
+            .style(cancel_style)
+            .add_modifier(Modifier::BOLD)
+            .alignment(ratatui::layout::Alignment::Center);
+
+        frame.render_widget(save_btn, buttons_area[1]);
+        frame.render_widget(cancel_btn, buttons_area[2]);
+
+        // Type
+        let arrow = if self.dropdown_open && self.dropdown_index == Some(IDX_TYPE) {
+            "▲"
+        } else {
+            "▼"
+        };
+        let type_label = format!("Type: [ {} {} ]", self.input[IDX_TYPE].value(), arrow);
+        frame.render_widget(
+            Paragraph::new(type_label).style(self.is_active_block_style(IDX_TYPE)),
+            type_area,
+        );
+
+        // Category
+        if !(self.dropdown_open && self.dropdown_index != Some(IDX_CATEGORY)) {
+            let arrow = if self.dropdown_open && self.dropdown_index == Some(IDX_CATEGORY) {
+                "▲"
+            } else {
+                "▼"
+            };
+            let category_label = format!(
+                "Category: [ {} {} ]",
+                self.input[IDX_CATEGORY].value(),
+                arrow
+            );
+            frame.render_widget(
+                Paragraph::new(category_label).style(self.is_active_block_style(IDX_CATEGORY)),
+                category_area,
+            );
+        }
+
+        if self.dropdown_open {
+            let idx = self.dropdown_index.unwrap();
+            let area = match idx {
+                IDX_TYPE => type_area,
+                IDX_CATEGORY => category_area,
+                _ => return,
+            };
+            let dropdown_area = Rect {
+                x: if self.dropdown_index == Some(IDX_TYPE) {
+                    area.x + 8
+                } else {
+                    area.x + 12
+                },
+                y: area.y + area.height,
+                width: area.width,
+                height: self.dropdown_options.len() as u16,
+            };
+            let items: Vec<ListItem> = self
+                .dropdown_options
+                .iter()
+                .enumerate()
+                .map(|(i, option)| {
+                    let style = if i == self.dropdown_selected {
+                        Style::default().fg(Color::LightGreen)
+                    } else {
+                        Style::default()
+                    };
+                    ListItem::new(*option).style(style)
+                })
+                .collect();
+
+            frame.render_widget(List::new(items).block(Block::default()), dropdown_area);
+        }
 
         // Insert mode
         match self.block_index {
-            0 => area = name_area,
-            1 => area = exec_area,
-            2 => area = icon_area,
-            3 => area = comment_area,
-            4 => return,
-            5 => todo!(),
-            6 => todo!(),
+            IDX_NAME => area = name_area,
+            IDX_EXEC => area = exec_area,
+            IDX_ICON => area = icon_area,
+
+            IDX_COMMAND => area = command_area,
+            IDX_COMMENT => area = comment_area,
+            IDX_TERMINAL => return,
+            IDX_TYPE => return,
+            IDX_CATEGORY => return,
+
+            IDX_SAVE => return,
+            IDX_CANCEL => return,
             _ => area = name_area,
         }
 
@@ -311,7 +624,7 @@ impl App {
             InputMode::Normal => {}
             InputMode::Insert => {
                 // This code is shit
-                let (area_x, area_y): (u16, u16) = if self.block_index >= 3 {
+                let (area_x, area_y): (u16, u16) = if self.block_index >= IDX_COMMAND {
                     (10, 0)
                 } else {
                     (0, 1)
