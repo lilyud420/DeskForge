@@ -18,6 +18,8 @@ use ratatui::{
 };
 use tui_input::{Input, backend::crossterm::EventHandler};
 
+use is_executable::IsExecutable;
+
 use std::{
     env::consts::EXE_EXTENSION,
     fmt::format,
@@ -32,18 +34,22 @@ const HALF_SCREEN: u16 = 89;
 const SMALLEST_WIDTH: u16 = 41;
 const SMALLEST_HEIGHT: u16 = 18;
 
-const NUM_BLOCK: usize = 10;
+const NUM_BLOCK: usize = 11;
 
 const IDX_NAME: usize = 0;
+
 const IDX_EXEC: usize = 1;
+const IDX_URL: usize = 1;
+
 const IDX_ICON: usize = 2;
 const IDX_COMMAND: usize = 3;
 const IDX_COMMENT: usize = 4;
-const IDX_TERMINAL: usize = 5;
-const IDX_TYPE: usize = 6;
-const IDX_CATEGORY: usize = 7;
-const IDX_SAVE: usize = 8;
-const IDX_CANCEL: usize = 9;
+const IDX_NODISPLAY: usize = 5;
+const IDX_TERMINAL: usize = 6;
+const IDX_TYPE: usize = 7;
+const IDX_CATEGORY: usize = 8;
+const IDX_SAVE: usize = 9;
+const IDX_CANCEL: usize = 10;
 
 /*
  * 0: Name
@@ -71,8 +77,8 @@ pub struct App {
 
     block_index: usize,
 
-    has_error: bool,
-    checkbox: bool,
+    checkbox_nodisplay: bool,
+    checkbox_terminal: bool,
     exit: bool,
 }
 
@@ -108,8 +114,9 @@ impl App {
             dropdown_index: None,
 
             last_key: None,
-            has_error: false,
-            checkbox: false,
+
+            checkbox_nodisplay: false,
+            checkbox_terminal: false,
             exit: false,
         }
     }
@@ -130,7 +137,7 @@ impl App {
     }
 
     fn submit_message(&mut self) {
-        if self.block_index == IDX_TERMINAL {
+        if self.block_index == IDX_TERMINAL || self.block_index == IDX_NODISPLAY {
             self.checkbox();
         }
         self.next_block();
@@ -171,34 +178,68 @@ impl App {
             );
         }
 
+        if self.input[IDX_TYPE].value().eq("Link") {
+            if trimmed.is_empty() {
+                return (Style::default().fg(Color::LightRed), " - Empty".to_string());
+            }
+
+            if !(trimmed.starts_with("files://")
+                || trimmed.starts_with("https://")
+                || trimmed.starts_with("mailto:")
+                || trimmed.starts_with("smb://")
+                || trimmed.starts_with("trash:///")
+                || trimmed.starts_with("recent:///"))
+            {
+                return (
+                    Style::default().fg(Color::Yellow),
+                    " - Invalid scheme".to_string(),
+                );
+            }
+
+            if trimmed.starts_with("file://") {
+                if let Some(local_path) = trimmed.strip_prefix("file://") {
+                    let path = Path::new(local_path);
+                    if !path.exists() {
+                        return (
+                            Style::default().fg(Color::LightRed),
+                            "- File not found".to_string(),
+                        );
+                    }
+                }
+            }
+
+            return (Style::default().fg(Color::LightGreen), "- OK".to_string());
+        }
+
+        if exts.is_empty() {
+            if !path.is_executable() {
+                return (
+                    Style::default().fg(Color::Yellow),
+                    " - Unexpected type".to_string(),
+                );
+            }
+        }
+
         if !exts.is_empty() {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if exts.iter().any(|&v| v.eq_ignore_ascii_case(ext)) {
-                    return (Style::default().fg(Color::LightGreen), "- OK".to_string());
+                    return (Style::default().fg(Color::LightGreen), " - OK".to_string());
                 }
             }
             return (
                 Style::default().fg(Color::Yellow),
-                "- Unexpected type".to_string(),
+                " - Unexpected type".to_string(),
             );
         }
 
-        return (Style::default().fg(Color::LightGreen), "- OK".to_string());
+        return (Style::default().fg(Color::LightGreen), " - OK".to_string());
     }
 
     fn can_save(&self) -> bool {
         let exec_path = Path::new(self.input[IDX_EXEC].value());
-        let icon_path = Path::new(self.input[IDX_ICON].value());
-
         let exec_ok = exec_path.exists();
-        let icon_ok = icon_path.exists()
-            && icon_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|ext| ["png", "jpg", "svg"].contains(&ext))
-                .unwrap_or(false);
 
-        exec_ok && icon_ok
+        exec_ok
     }
 
     fn handle_event(&mut self) -> Result<()> {
@@ -257,12 +298,9 @@ impl App {
                 }
 
                 KeyCode::Char('i') => match self.block_index {
-                    IDX_TERMINAL => self.checkbox(),
+                    IDX_TERMINAL | IDX_NODISPLAY => self.checkbox(),
                     IDX_TYPE => {
-                        self.open_dropdown(
-                            IDX_TYPE,
-                            vec!["Application", "Programming", "Utility", "Game", "Other"],
-                        );
+                        self.open_dropdown(IDX_TYPE, vec!["Application", "Link", "Directory"]);
                         self.input_mode = InputMode::Insert;
                     }
 
@@ -278,7 +316,6 @@ impl App {
                                 "Graphics",
                                 "Network",
                                 "Office",
-                                "Science",
                                 "Settings",
                                 "System",
                             ],
@@ -349,10 +386,6 @@ impl App {
         }
     }
 
-    fn _is_active_block(&self, index: usize) -> bool {
-        matches!(self.input_mode, InputMode::Insert) && self.block_index == index
-    }
-
     fn is_active_block_style(&self, index: usize) -> Style {
         if self.block_index == index && index == IDX_CANCEL {
             Style::default().fg(Color::LightRed)
@@ -364,7 +397,11 @@ impl App {
     }
 
     fn checkbox(&mut self) {
-        self.checkbox = !self.checkbox;
+        match self.block_index {
+            IDX_NODISPLAY => self.checkbox_nodisplay = !self.checkbox_nodisplay,
+            IDX_TERMINAL => self.checkbox_terminal = !self.checkbox_terminal,
+            _ => {}
+        }
     }
 
     fn exit(&mut self) {
@@ -385,17 +422,68 @@ impl App {
 
         writeln!(file, "[Desktop Entry]")?;
         writeln!(file, "Name={}", self.input[IDX_NAME])?;
-        writeln!(
-            file,
-            "Exec={} {}",
-            self.input[IDX_COMMAND], self.input[IDX_EXEC]
-        )?;
+
+        let exec_line = if self.input[IDX_COMMAND].value().trim().starts_with("env ") {
+            let parts: Vec<&str> = self.input[IDX_COMMAND].value().split_whitespace().collect();
+            if let Some((_env_part, rest)) = parts.split_first() {
+                let mut iter = rest.iter();
+                let mut env_vars = vec![];
+                let mut flags = vec![];
+                while let Some(s) = iter.next() {
+                    if s.contains('=') {
+                        env_vars.push(*s);
+                    } else {
+                        flags.push(*s);
+                        flags.extend(iter);
+                        break;
+                    }
+                }
+                format!(
+                    "env {} {} {}",
+                    env_vars.join(" "),
+                    self.input[IDX_EXEC].value(),
+                    flags.join(" ")
+                )
+            } else {
+                format!("{} {}", self.input[IDX_COMMAND], self.input[IDX_EXEC])
+            }
+        } else {
+            format!("{} {}", self.input[IDX_COMMAND], self.input[IDX_EXEC])
+        };
+
+        writeln!(file, "Exec={}", exec_line)?;
+
+        match self.input[IDX_TYPE].value() {
+            "Link" => writeln!(file, "URL={}", self.input[IDX_URL])?,
+            "Application" => writeln!(
+                file,
+                "Exec={} {}",
+                self.input[IDX_COMMAND], self.input[IDX_EXEC]
+            )?,
+
+            "Directory" => todo!(),
+            _ => {}
+        }
+
         writeln!(file, "Icon={}", self.input[IDX_ICON])?;
         writeln!(file, "Comment={}", self.input[IDX_COMMENT])?;
         writeln!(
             file,
+            "NoDisplay={}",
+            if self.checkbox_nodisplay {
+                "true"
+            } else {
+                "false"
+            }
+        )?;
+        writeln!(
+            file,
             "Terminal={}",
-            if self.checkbox { "true" } else { "false" }
+            if self.checkbox_terminal {
+                "true"
+            } else {
+                "false"
+            }
         )?;
         writeln!(file, "Type={}", self.input[IDX_TYPE])?;
         writeln!(
@@ -432,7 +520,7 @@ impl App {
                 Constraint::Percentage(20),
             ])
             .split(frame.area());
-            
+
             let current_area = warning_layout[1];
             let needed_area = warning_layout[2];
             let current = Paragraph::new(format!(
@@ -540,12 +628,14 @@ impl App {
         let [
             command_area,
             comment_area,
+            nodisplay_area,
             terminal_area,
             type_area,
             category_area,
         ] = *Layout::vertical([
             Constraint::Length(2), // Command
             Constraint::Length(2), // Comment
+            Constraint::Length(2), // NoDisplay
             Constraint::Length(2), // Terminal
             Constraint::Length(2), // Type
             Constraint::Length(2), // Category
@@ -575,18 +665,35 @@ impl App {
             .add_modifier(Modifier::BOLD);
         frame.render_widget(name, name_area);
 
-        // Exec block
-        let (exec_color, exec_status) =
-            self.validate_path(self.input[IDX_EXEC].value(), &[], IDX_EXEC);
-        let exec = Paragraph::new(self.input[IDX_EXEC].value())
-            .style(exec_color)
-            .block(
-                Block::bordered()
-                    .title(format!("Exec{}", exec_status))
-                    .border_style(exec_color),
-            )
-            .add_modifier(Modifier::BOLD);
-        frame.render_widget(exec, exec_area);
+        let type_value = self.input[IDX_TYPE].value();
+        let exec_or_url_area = exec_area;
+
+        match type_value {
+            "Link" => {
+                let url_style = self.is_active_block_style(IDX_URL);
+                let url = Paragraph::new(self.input[IDX_URL].value())
+                    .style(url_style)
+                    .block(Block::bordered().title("URL"))
+                    .add_modifier(Modifier::BOLD);
+                frame.render_widget(url, exec_or_url_area);
+            }
+
+            // Exec block
+            _ => {
+                let (exec_color, exec_status) =
+                    self.validate_path(self.input[IDX_EXEC].value(), &[], IDX_EXEC);
+                let exec = Paragraph::new(self.input[IDX_EXEC].value())
+                    .style(exec_color)
+                    .block(
+                        Block::bordered()
+                            .title(format!("Exec{}", exec_status))
+                            .border_style(exec_color),
+                    )
+                    .add_modifier(Modifier::BOLD);
+                frame.render_widget(exec, exec_or_url_area);
+            }
+        }
+        // URL block
 
         // Icon block
         let (icon_style, icon_status) = self.validate_path(
@@ -618,9 +725,21 @@ impl App {
             .add_modifier(Modifier::BOLD);
         frame.render_widget(comment, comment_area);
 
+        // NoDisplay block
+        let nodisplay_style = self.is_active_block_style(IDX_NODISPLAY);
+        let nodisplay_label = if self.checkbox_nodisplay {
+            "NoDisplay: [ X ]"
+        } else {
+            "NoDisplay: [   ]"
+        };
+        let nodisplay = Paragraph::new(nodisplay_label)
+            .style(nodisplay_style)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(nodisplay, nodisplay_area);
+
         // Terminal block
         let terminal_style = self.is_active_block_style(IDX_TERMINAL);
-        let terminal_label = if self.checkbox {
+        let terminal_label = if self.checkbox_terminal {
             "Terminal: [ X ]"
         } else {
             "Terminal: [   ]"
@@ -729,6 +848,7 @@ impl App {
 
             IDX_COMMAND => area = command_area,
             IDX_COMMENT => area = comment_area,
+            IDX_NODISPLAY => return,
             IDX_TERMINAL => return,
             IDX_TYPE => return,
             IDX_CATEGORY => return,
