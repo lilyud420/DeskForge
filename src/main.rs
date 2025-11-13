@@ -3,9 +3,6 @@ mod cli;
 use clap::Parser;
 use cli::Cli;
 
-mod utils;
-use crate::utils::shrink_rect::shrink;
-
 use color_eyre::{
     eyre::{Ok, Result},
     owo_colors::OwoColorize,
@@ -22,8 +19,18 @@ use ratatui::{
 use tui_input::{Input, backend::crossterm::EventHandler};
 
 use std::{
-    fmt::format, fs::{self, File, OpenOptions}, io::{self, BufRead, BufReader, Write}, path::{Path, PathBuf}, str::RSplitTerminator
+    env::consts::EXE_EXTENSION,
+    fmt::format,
+    fs::{self, File, OpenOptions},
+    io::{self, BufRead, BufReader, Write},
+    path::{Path, PathBuf},
+    str::RSplitTerminator,
+    sync::WaitTimeoutResult,
 };
+
+const HALF_SCREEN: u16 = 89;
+const SMALLEST_WIDTH: u16 = 41;
+const SMALLEST_HEIGHT: u16 = 18;
 
 const NUM_BLOCK: usize = 10;
 
@@ -63,6 +70,8 @@ pub struct App {
     dropdown_index: Option<usize>,
 
     block_index: usize,
+
+    has_error: bool,
     checkbox: bool,
     exit: bool,
 }
@@ -99,6 +108,7 @@ impl App {
             dropdown_index: None,
 
             last_key: None,
+            has_error: false,
             checkbox: false,
             exit: false,
         }
@@ -120,9 +130,6 @@ impl App {
     }
 
     fn submit_message(&mut self) {
-        if self.block_index == IDX_CANCEL {
-            self.exit();
-        }
         if self.block_index == IDX_TERMINAL {
             self.checkbox();
         }
@@ -135,6 +142,63 @@ impl App {
         self.dropdown_selected = 0;
         self.dropdown_index = Some(index);
         self.input[index] = Input::from(self.dropdown_options[0]);
+    }
+
+    fn validate_path(&self, input: &str, exts: &[&str], index: usize) -> (Style, String) {
+        let trimmed = input.trim();
+        let path = Path::new(trimmed);
+
+        if self.block_index != index {
+            return (Style::default(), "".to_string());
+        }
+
+        if trimmed.is_empty() {
+            match index {
+                IDX_EXEC => {
+                    return (Style::default().fg(Color::LightRed), " - Empty".to_string());
+                }
+                IDX_ICON => {
+                    return (Style::default().fg(Color::LightRed), " - Empty".to_string());
+                }
+                _ => {}
+            }
+        }
+
+        if !path.exists() {
+            return (
+                Style::default().fg(Color::LightRed),
+                "- Not found".to_string(),
+            );
+        }
+
+        if !exts.is_empty() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if exts.iter().any(|&v| v.eq_ignore_ascii_case(ext)) {
+                    return (Style::default().fg(Color::LightGreen), "- OK".to_string());
+                }
+            }
+            return (
+                Style::default().fg(Color::Yellow),
+                "- Unexpected type".to_string(),
+            );
+        }
+
+        return (Style::default().fg(Color::LightGreen), "- OK".to_string());
+    }
+
+    fn can_save(&self) -> bool {
+        let exec_path = Path::new(self.input[IDX_EXEC].value());
+        let icon_path = Path::new(self.input[IDX_ICON].value());
+
+        let exec_ok = exec_path.exists();
+        let icon_ok = icon_path.exists()
+            && icon_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|ext| ["png", "jpg", "svg"].contains(&ext))
+                .unwrap_or(false);
+
+        exec_ok && icon_ok
     }
 
     fn handle_event(&mut self) -> Result<()> {
@@ -207,7 +271,6 @@ impl App {
                             IDX_CATEGORY,
                             vec![
                                 "None",
-                                "AudioVideo",
                                 "Audio",
                                 "Video",
                                 "Development",
@@ -222,22 +285,13 @@ impl App {
                         );
                         self.input_mode = InputMode::Insert;
                     }
-                    _ => self.input_mode = InputMode::Insert,
-                },
-
-                KeyCode::Enter => match self.block_index {
                     IDX_SAVE => {
-                        let file_name = format!(
-                            "{}.desktop",
-                            self.input[IDX_NAME].value()
-                        );
+                        let file_name = format!("{}.desktop", self.input[IDX_NAME].value());
                         self.save_as_desktop(&file_name).expect("CANNOT SAVE!");
                         self.exit();
                     }
-                    _ => {
-                        self.checkbox();
-                        self.submit_message();
-                    }
+                    IDX_CANCEL => self.exit(),
+                    _ => self.input_mode = InputMode::Insert,
                 },
 
                 _ => self.last_key = None,
@@ -274,13 +328,22 @@ impl App {
                         IDX_TYPE | IDX_CATEGORY => {
                             self.dropdown_open = false;
                             self.dropdown_index = None;
+                            self.input_mode = InputMode::Normal;
                         }
                         _ => self.input_mode = InputMode::Normal,
                     }
                 }
 
                 if key_event.code == KeyCode::Enter {
-                    self.submit_message();
+                    match self.block_index {
+                        IDX_COMMENT => {
+                            self.submit_message();
+                            self.input_mode = InputMode::Normal;
+                        }
+                        IDX_TYPE => return,
+                        IDX_CATEGORY => return,
+                        _ => self.submit_message(),
+                    }
                 }
             }
         }
@@ -309,19 +372,17 @@ impl App {
     }
 
     fn save_as_desktop(&self, file_name: &str) -> Result<()> {
-        // let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")) ;
         let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+
         path.push("applications");
-        // fs::create_dir_all(&path)?;
-        
         path.push(file_name);
-        
+
         let mut file = OpenOptions::new()
             .write(true)
             .truncate(true)
             .create(true)
             .open(&path)?;
-        
+
         writeln!(file, "[Desktop Entry]")?;
         writeln!(file, "Name={}", self.input[IDX_NAME])?;
         writeln!(
@@ -360,13 +421,46 @@ impl App {
 
     fn draw(&self, frame: &mut Frame) {
         let area;
+        let frame_width = frame.area().width;
+        let frame_height = frame.area().height;
+
+        if frame_width < SMALLEST_WIDTH || frame_height < SMALLEST_HEIGHT {
+            let warning_layout = Layout::vertical([
+                Constraint::Percentage(20),
+                Constraint::Percentage(60),
+                Constraint::Length(3),
+                Constraint::Percentage(20),
+            ])
+            .split(frame.area());
+            
+            let current_area = warning_layout[1];
+            let needed_area = warning_layout[2];
+            let current = Paragraph::new(format!(
+                "Terminal size is too small:\n Width: {} Height: {}",
+                frame_width, frame_height
+            ))
+            .centered();
+
+            let needed = Paragraph::new(format!(
+                "Needed terminal size:\n Width: {} Height: {}",
+                SMALLEST_WIDTH, SMALLEST_HEIGHT
+            ))
+            .centered();
+
+            frame.render_widget(current, current_area);
+            frame.render_widget(needed, needed_area);
+
+            return;
+        }
+
+        let horizontal_margin = if frame_width > HALF_SCREEN { 20 } else { 0 };
 
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(3),
         ])
-        .horizontal_margin(20);
+        .horizontal_margin(horizontal_margin);
 
         let [_instructions_area, outline_area, _desktop_name] = vertical.areas(frame.area());
 
@@ -482,18 +576,31 @@ impl App {
         frame.render_widget(name, name_area);
 
         // Exec block
-        let exec_style = self.is_active_block_style(IDX_EXEC);
+        let (exec_color, exec_status) =
+            self.validate_path(self.input[IDX_EXEC].value(), &[], IDX_EXEC);
         let exec = Paragraph::new(self.input[IDX_EXEC].value())
-            .style(exec_style)
-            .block(Block::bordered().title("Exec"))
+            .style(exec_color)
+            .block(
+                Block::bordered()
+                    .title(format!("Exec{}", exec_status))
+                    .border_style(exec_color),
+            )
             .add_modifier(Modifier::BOLD);
         frame.render_widget(exec, exec_area);
 
         // Icon block
-        let icon_style = self.is_active_block_style(IDX_ICON);
+        let (icon_style, icon_status) = self.validate_path(
+            self.input[IDX_ICON].value(),
+            &["png", "svg", "jpg"],
+            IDX_ICON,
+        );
         let icon = Paragraph::new(self.input[IDX_ICON].value())
             .style(icon_style)
-            .block(Block::bordered().title("Icon"))
+            .block(
+                Block::bordered()
+                    .title(format!("Icon{}", icon_status))
+                    .border_style(icon_style),
+            )
             .add_modifier(Modifier::BOLD);
         frame.render_widget(icon, icon_area);
 
@@ -522,22 +629,6 @@ impl App {
             .style(terminal_style)
             .add_modifier(Modifier::BOLD);
         frame.render_widget(terminal, terminal_area);
-
-        // Buttons
-        let save_style = self.is_active_block_style(IDX_SAVE);
-        let save_btn = Paragraph::new("[ Save ]")
-            .style(save_style)
-            .add_modifier(Modifier::BOLD)
-            .alignment(ratatui::layout::Alignment::Center);
-
-        let cancel_style = self.is_active_block_style(IDX_CANCEL);
-        let cancel_btn = Paragraph::new("[ Cancel ]")
-            .style(cancel_style)
-            .add_modifier(Modifier::BOLD)
-            .alignment(ratatui::layout::Alignment::Center);
-
-        frame.render_widget(save_btn, buttons_area[1]);
-        frame.render_widget(cancel_btn, buttons_area[2]);
 
         // Type
         let arrow = if self.dropdown_open && self.dropdown_index == Some(IDX_TYPE) {
@@ -603,6 +694,33 @@ impl App {
             frame.render_widget(List::new(items).block(Block::default()), dropdown_area);
         }
 
+        // Buttons
+        let save_style = if self.can_save() {
+            self.is_active_block_style(IDX_SAVE)
+        } else if !self.can_save() && self.block_index == IDX_SAVE {
+            Style::default().fg(Color::LightRed)
+        } else {
+            Style::default()
+        };
+        let save_label = if self.can_save() {
+            "[ SAVE ]"
+        } else {
+            "[ CAN'T SAVE ]"
+        };
+        let save_btn = Paragraph::new(format!("{}", save_label))
+            .style(save_style)
+            .add_modifier(Modifier::BOLD)
+            .alignment(ratatui::layout::Alignment::Center);
+
+        let cancel_style = self.is_active_block_style(IDX_CANCEL);
+        let cancel_btn = Paragraph::new("[ CANCEL ]")
+            .style(cancel_style)
+            .add_modifier(Modifier::BOLD)
+            .alignment(ratatui::layout::Alignment::Center);
+
+        frame.render_widget(save_btn, buttons_area[1]);
+        frame.render_widget(cancel_btn, buttons_area[2]);
+
         // Insert mode
         match self.block_index {
             IDX_NAME => area = name_area,
@@ -623,7 +741,6 @@ impl App {
         match self.input_mode {
             InputMode::Normal => {}
             InputMode::Insert => {
-                // This code is shit
                 let (area_x, area_y): (u16, u16) = if self.block_index >= IDX_COMMAND {
                     (10, 0)
                 } else {
