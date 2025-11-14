@@ -140,16 +140,20 @@ impl App {
 
         let optional_inner = optional_block.inner(optional_area);
         let [
-            command_area,
+            version_area,
             comment_area,
+            action_area,
             nodisplay_area,
+            startupnotify_area,
             terminal_area,
             type_area,
             category_area,
         ] = *Layout::vertical([
             Constraint::Length(2), // Command
             Constraint::Length(2), // Comment
+            Constraint::Length(2), // Action
             Constraint::Length(2), // NoDisplay
+            Constraint::Length(2), // StartUpNotify
             Constraint::Length(2), // Terminal
             Constraint::Length(2), // Type
             Constraint::Length(2), // Category
@@ -172,10 +176,10 @@ impl App {
         .split(button_area);
 
         // Desktop name block
-        let name_style = self.is_active_block_style(IDX_NAME);
+        let (name_style, name_status) = self.validate_name(self.input[IDX_NAME].value(), IDX_NAME);
         let name = Paragraph::new(self.input[IDX_NAME].value())
             .style(name_style)
-            .block(Block::bordered().title("Name"))
+            .block(Block::bordered().title(format!("Name{}", name_status)))
             .add_modifier(Modifier::BOLD);
         frame.render_widget(name, name_area);
 
@@ -226,11 +230,11 @@ impl App {
         frame.render_widget(icon, icon_area);
 
         // Command block
-        let command_style = self.is_active_block_style(IDX_COMMAND);
-        let command = Paragraph::new(format!("Command: [ {}  ]", self.input[IDX_COMMAND].value()))
-            .style(command_style)
+        let version_style = self.is_active_block_style(IDX_VERSION);
+        let version = Paragraph::new(format!("Version: [ {}  ]", self.input[IDX_VERSION].value()))
+            .style(version_style)
             .add_modifier(Modifier::BOLD);
-        frame.render_widget(command, command_area);
+        frame.render_widget(version, version_area);
 
         // Comment block
         let comment_style = self.is_active_block_style(IDX_COMMENT);
@@ -238,6 +242,13 @@ impl App {
             .style(comment_style)
             .add_modifier(Modifier::BOLD);
         frame.render_widget(comment, comment_area);
+
+        // Comment block
+        let action_style = self.is_active_block_style(IDX_ACTION);
+        let action = Paragraph::new(format!("Actions: [ {}  ]", self.input[IDX_ACTION].value()))
+            .style(action_style)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(action, action_area);
 
         // NoDisplay block
         let nodisplay_style = self.is_active_block_style(IDX_NODISPLAY);
@@ -250,6 +261,18 @@ impl App {
             .style(nodisplay_style)
             .add_modifier(Modifier::BOLD);
         frame.render_widget(nodisplay, nodisplay_area);
+
+        // NoDisplay block
+        let startupnotify_style = self.is_active_block_style(IDX_STARTUPNOTIFY);
+        let startupnotify_label = if self.checkbox_startupnotify {
+            "StartUpNotify: [ X ]"
+        } else {
+            "StartUpNotify: [   ]"
+        };
+        let startupnotify = Paragraph::new(startupnotify_label)
+            .style(startupnotify_style)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(startupnotify, startupnotify_area);
 
         // Terminal block
         let terminal_style = self.is_active_block_style(IDX_TERMINAL);
@@ -360,9 +383,11 @@ impl App {
             IDX_EXEC => area = exec_area,
             IDX_ICON => area = icon_area,
 
-            IDX_COMMAND => area = command_area,
+            IDX_VERSION => area = version_area,
             IDX_COMMENT => area = comment_area,
+            IDX_ACTION => area = action_area,
             IDX_NODISPLAY => return,
+            IDX_STARTUPNOTIFY => return,
             IDX_TERMINAL => return,
             IDX_TYPE => return,
             IDX_CATEGORY => return,
@@ -375,7 +400,7 @@ impl App {
         match self.input_mode {
             InputMode::Normal => {}
             InputMode::Insert => {
-                let (area_x, area_y): (u16, u16) = if self.block_index >= IDX_COMMAND {
+                let (area_x, area_y): (u16, u16) = if self.block_index >= IDX_VERSION {
                     (10, 0)
                 } else {
                     (0, 1)

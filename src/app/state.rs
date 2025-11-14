@@ -29,6 +29,7 @@ pub struct App {
     pub block_index: usize,
 
     pub checkbox_nodisplay: bool,
+    pub checkbox_startupnotify: bool,
     pub checkbox_terminal: bool,
     pub exit: bool,
 }
@@ -67,6 +68,7 @@ impl App {
             last_key: None,
 
             checkbox_nodisplay: false,
+            checkbox_startupnotify: true,
             checkbox_terminal: false,
             exit: false,
         }
@@ -87,9 +89,6 @@ impl App {
     }
 
     pub fn submit_message(&mut self) {
-        if self.block_index == IDX_TERMINAL || self.block_index == IDX_NODISPLAY {
-            self.checkbox();
-        }
         self.next_block();
     }
 
@@ -116,53 +115,30 @@ impl App {
         writeln!(file, "[Desktop Entry]")?;
         writeln!(file, "Name={}", self.input[IDX_NAME])?;
 
-        let exec_line = if self.input[IDX_COMMAND].value().trim().starts_with("env ") {
-            let parts: Vec<&str> = self.input[IDX_COMMAND].value().split_whitespace().collect();
-            if let Some((_env_part, rest)) = parts.split_first() {
-                let mut iter = rest.iter();
-                let mut env_vars = vec![];
-                let mut flags = vec![];
-                while let Some(s) = iter.next() {
-                    if s.contains('=') {
-                        env_vars.push(*s);
-                    } else {
-                        flags.push(*s);
-                        flags.extend(iter);
-                        break;
-                    }
-                }
-                format!(
-                    "env {} {} {}",
-                    env_vars.join(" "),
-                    self.input[IDX_EXEC].value(),
-                    flags.join(" ")
-                )
-            } else {
-                format!("{} {}", self.input[IDX_COMMAND], self.input[IDX_EXEC])
-            }
-        } else {
-            format!("{} {}", self.input[IDX_COMMAND], self.input[IDX_EXEC])
-        };
-
-        writeln!(file, "Exec={}", exec_line)?;
-
         match self.input[IDX_TYPE].value() {
             "Link" => writeln!(file, "URL={}", self.input[IDX_URL])?,
-            "Application" => writeln!(
-                file,
-                "Exec={} {}",
-                self.input[IDX_COMMAND], self.input[IDX_EXEC]
-            )?,
+            "Application" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
 
             "Directory" => todo!(),
             _ => {}
         }
 
         writeln!(file, "Icon={}", self.input[IDX_ICON])?;
+        writeln!(file, "Version={}", self.input[IDX_VERSION])?;
         writeln!(file, "Comment={}", self.input[IDX_COMMENT])?;
+        writeln!(file, "Actions={}", self.input[IDX_ACTION])?;
         writeln!(
             file,
             "NoDisplay={}",
+            if self.checkbox_nodisplay {
+                "true"
+            } else {
+                "false"
+            }
+        )?;
+        writeln!(
+            file,
+            "StartupNotify={}",
             if self.checkbox_nodisplay {
                 "true"
             } else {
@@ -192,6 +168,22 @@ impl App {
     }
 
     pub fn can_save(&self) -> bool {
+        let name = self.input[IDX_NAME].value().trim();
+        if name.is_empty() {
+            return false;
+        }
+
+        let file_name = format!("{}.desktop", name);
+
+        let save_path = dirs::data_dir()
+            .unwrap()
+            .join("applications")
+            .join(&file_name);
+
+        if save_path.exists() {
+            return false;
+        }
+
         match self.input[IDX_TYPE].value() {
             "Link" => {
                 let url = self.input[IDX_URL].value().trim();
@@ -208,6 +200,7 @@ impl App {
                 }
 
                 url.starts_with("https://")
+                    || url.starts_with("http://")
                     || url.starts_with("mailto:")
                     || url.starts_with("smb://")
                     || url.starts_with("trash:///")
@@ -249,6 +242,7 @@ impl App {
 
             if !(trimmed.starts_with("file://")
                 || trimmed.starts_with("https://")
+                || trimmed.starts_with("http://")
                 || trimmed.starts_with("mailto:")
                 || trimmed.starts_with("smb://")
                 || trimmed.starts_with("trash:///")
@@ -275,6 +269,13 @@ impl App {
             return (Style::default().fg(Color::LightGreen), "- OK".to_string());
         }
 
+        if !path.exists() {
+            return (
+                Style::default().fg(Color::LightRed),
+                "- Not found".to_string(),
+            );
+        }
+
         if exts.is_empty() {
             if !path.is_executable() {
                 return (
@@ -282,13 +283,6 @@ impl App {
                     " - Unexpected type".to_string(),
                 );
             }
-        }
-
-        if !path.exists() {
-            return (
-                Style::default().fg(Color::LightRed),
-                "- Not found".to_string(),
-            );
         }
 
         if !exts.is_empty() {
@@ -306,6 +300,33 @@ impl App {
         return (Style::default().fg(Color::LightGreen), " - OK".to_string());
     }
 
+    pub fn validate_name(&self, input: &str, index: usize) -> (Style, String) {
+        let trimmed = input.trim();
+
+        if self.block_index != index {
+            return (Style::default(), "".to_string());
+        }
+
+        if trimmed.is_empty() {
+            return (Style::default().fg(Color::LightRed), " - Empty".to_string());
+        }
+
+        let file_name = format!("{}.desktop", trimmed);
+
+        let save_path = dirs::data_local_dir()
+            .unwrap()
+            .join("applications")
+            .join(&file_name);
+
+        if save_path.exists() {
+            return (
+                Style::default().fg(Color::LightRed),
+                " - Already exists".to_string(),
+            );
+        }
+
+        (Style::default().fg(Color::LightGreen), " - OK".to_string())
+    }
     pub fn is_active_block_style(&self, index: usize) -> Style {
         if self.block_index == index && index == IDX_CANCEL {
             Style::default().fg(Color::LightRed)
@@ -320,6 +341,7 @@ impl App {
         match self.block_index {
             IDX_NODISPLAY => self.checkbox_nodisplay = !self.checkbox_nodisplay,
             IDX_TERMINAL => self.checkbox_terminal = !self.checkbox_terminal,
+            IDX_STARTUPNOTIFY => self.checkbox_startupnotify = !self.checkbox_startupnotify,
             _ => {}
         }
     }
