@@ -70,18 +70,28 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(name) = cli.new {
-        let file_name = name;
-
-        if desktop_exists(file_name.clone()) {
-            eprintln!("[ERROR]: File name already exist!");
-            exit(1);
-        }
-
-        let mut terminal = ratatui::init();
-        let result = App::new(Some(file_name.unwrap_or_default()), false).run(&mut terminal);
-        ratatui::restore();
-        return result;
+    match cli.new {
+        None => {},
+        Some(None) => {
+             let default_name = "".to_string();
+     
+             let mut terminal = ratatui::init();
+             let result = App::new(Some(default_name), false).run(&mut terminal);
+             ratatui::restore();
+             return result;
+         }
+         Some(Some(name)) => {
+             if desktop_exists(Some(name.clone())) {
+                 eprintln!("[ERROR]: File name already exists!");
+                 exit(1);
+             }
+     
+     
+             let mut terminal = ratatui::init();
+             let result = App::new(Some(name), false).run(&mut terminal);
+             ratatui::restore();
+             return result;
+         }
     }
 
     if let Some(name) = cli.edit {
