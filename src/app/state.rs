@@ -9,6 +9,9 @@ use ratatui::{
 };
 use tui_input::Input;
 
+use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
 use std::{
     fs::OpenOptions,
     io::Write,
@@ -41,18 +44,56 @@ pub enum InputMode {
 }
 
 impl App {
-    pub fn new(file_name: Option<String>) -> Self {
+    pub fn new(file_name: Option<String>, file_edit: bool) -> Self {
         let mut input = vec![Input::default(); NUM_BLOCK];
         let mut block_index: usize = 0;
 
         input[IDX_TYPE] = Input::from("Application");
         input[IDX_CATEGORY] = Input::from("None");
 
-        if let Some(name) = file_name
+        if let Some(name) = file_name.clone()
             && name != ""
         {
             input[0] = Input::from(name);
             block_index += 1;
+        }
+
+        if file_edit {
+            if let Some(name) = &file_name {
+                let path: PathBuf = dirs::data_dir()
+                    .unwrap_or_else(|| PathBuf::from("/tmp"))
+                    .join("applications")
+                    .join(name);
+
+                if path.exists() {
+                    if let std::result::Result::Ok(file) = File::open(&path) {
+                        let reader = BufReader::new(file);
+
+                        for line in reader.lines().flatten() {
+                            if let Some((key, value)) = line.split_once('=') {
+                                match key {
+                                    "Name" => input[IDX_NAME] = Input::from(value),
+                                    "Exec" => input[IDX_EXEC] = Input::from(value),
+                                    "URL" => input[IDX_URL] = Input::from(value),
+                                    "Icon" => input[IDX_ICON] = Input::from(value),
+                                    "Version" => input[IDX_VERSION] = Input::from(value),
+                                    "Comment" => input[IDX_COMMENT] = Input::from(value),
+                                    "Actions" => input[IDX_ACTION] = Input::from(value),
+                                    "NoDisplay" => input[IDX_NODISPLAY] = Input::from(value),
+                                    "StartupNotify" => {
+                                        input[IDX_STARTUPNOTIFY] = Input::from(value)
+                                    }
+                                    "Terminal" => input[IDX_TERMINAL] = Input::from(value),
+                                    "Type" => input[IDX_TYPE] = Input::from(value),
+                                    "Category" => input[IDX_CATEGORY] = Input::from(value),
+
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Self {
@@ -118,8 +159,8 @@ impl App {
         match self.input[IDX_TYPE].value() {
             "Link" => writeln!(file, "URL={}", self.input[IDX_URL])?,
             "Application" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
-
-            "Directory" => todo!(),
+            "Directory" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
+            "Other" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
             _ => {}
         }
 
@@ -206,12 +247,19 @@ impl App {
                     || url.starts_with("trash:///")
                     || url.starts_with("recent:///")
             }
-            _ => {
-                let exec_path = Path::new(self.input[IDX_EXEC].value());
-                let exec_ok = exec_path.exists();
+            "Application" => {
+                let trimmed = self.input[IDX_EXEC].value().trim();
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
-                exec_ok
+                if let Some(exec_raw) = parts.iter().find(|&&p| p.contains('/')) {
+                    let exec_path = Path::new(exec_raw);
+
+                    exec_path.exists()
+                } else {
+                    false
+                }
             }
+            _ => true,
         }
     }
 
@@ -221,6 +269,18 @@ impl App {
 
         if self.block_index != index {
             return (Style::default(), "".to_string());
+        }
+
+        if !path.exists() {
+            match self.input[IDX_TYPE].value() {
+                "Other" | "Directory" => {
+                    return (
+                        self.is_active_block_style(IDX_EXEC),
+                        "- Ignored".to_string(),
+                    );
+                }
+                _ => {}
+            }
         }
 
         if trimmed.is_empty() {
@@ -269,20 +329,32 @@ impl App {
             return (Style::default().fg(Color::LightGreen), "- OK".to_string());
         }
 
-        if !path.exists() {
-            return (
-                Style::default().fg(Color::LightRed),
-                "- Not found".to_string(),
-            );
-        }
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        let exec_path_opt = parts.iter().find(|&&p| p.contains('/'));
 
-        if exts.is_empty() {
-            if !path.is_executable() {
-                return (
-                    Style::default().fg(Color::Yellow),
-                    " - Unexpected type".to_string(),
-                );
+        match exts.is_empty() {
+            true => {
+                if let Some(exec_path) = exec_path_opt {
+                    let path = Path::new(exec_path);
+
+                    if !path.exists() {
+                        return (
+                            Style::default().fg(Color::LightRed),
+                            " - Not found".to_string(),
+                        );
+                    }
+
+                    if !path.is_executable() {
+                        return (
+                            Style::default().fg(Color::Yellow),
+                            " - Unexpected type".to_string(),
+                        );
+                    }
+
+                    return (Style::default().fg(Color::LightGreen), " - OK".to_string());
+                }
             }
+            false => {}
         }
 
         if !exts.is_empty() {
