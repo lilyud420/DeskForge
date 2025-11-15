@@ -96,9 +96,9 @@ impl App {
                         self.input_mode = InputMode::Insert;
                     }
                     IDX_SAVE => {
-                        if !self.can_save() {
-                            return;
-                        }
+                        // if !self.can_save() {
+                        //     return;
+                        // }
                         let file_name = format!("{}.desktop", self.input[IDX_NAME].value());
                         self.save_as_desktop(&file_name)
                             .expect("[ERROR]: Can't save!");

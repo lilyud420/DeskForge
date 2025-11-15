@@ -18,7 +18,7 @@ impl App {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_event()?;
         }
-        
+
         Ok(())
     }
 
@@ -132,7 +132,7 @@ impl App {
         let required_inner = requireed_block.inner(required_area);
         let [name_area, exec_area, icon_area] = *Layout::vertical([
             Constraint::Length(3), // Name
-            Constraint::Min(1),    // Exec
+            Constraint::Min(3),    // Exec
             Constraint::Length(3), // Icon
         ])
         .split(required_inner) else {
@@ -187,7 +187,7 @@ impl App {
         // Exec & URL block
         let type_value = self.input[IDX_TYPE].value();
         let mut exec_or_url_area = Rect {
-            x: 22,
+            x: exec_area.x,
             y: 6,
             width: exec_area.width.max(1),
             height: 3,
@@ -378,18 +378,20 @@ impl App {
         }
 
         // Buttons
-        let save_style = if self.can_save() {
-            self.is_active_block_style(IDX_SAVE)
-        } else if !self.can_save() && self.block_index == IDX_SAVE {
-            Style::default().fg(Color::LightRed)
-        } else {
-            Style::default()
-        };
-        let save_label = if self.can_save() {
-            "[ SAVE ]"
-        } else {
-            "[ CAN'T SAVE ]"
-        };
+        // let save_style = if self.can_save() {
+        //     self.is_active_block_style(IDX_SAVE)
+        // } else if !self.can_save() && self.block_index == IDX_SAVE {
+        //     Style::default().fg(Color::LightRed)
+        // } else {
+        //     Style::default()
+        // };
+        // let save_label = if self.can_save() {
+        //     "[ SAVE ]"
+        // } else {
+        //     "[ CAN'T SAVE ]"
+        // };
+        let save_style = self.is_active_block_style(IDX_SAVE);
+        let save_label = "[ SAVE ]";
         let save_btn = Paragraph::new(format!("{}", save_label))
             .style(save_style)
             .add_modifier(Modifier::BOLD)
@@ -432,21 +434,23 @@ impl App {
                 } else {
                     (0, 1)
                 };
-                let input_len = self.input[IDX_EXEC].value().len() as u16;
+                
+                let input_len = self.input[IDX_EXEC].value().len();
                 let current_cursor = self.input[self.block_index].visual_cursor() as u16;
                 let mut cursor_x = area.x + area_x + current_cursor + 1;
                 let mut cursor_y = area.y.saturating_add(area_y);
 
                 if self.block_index == IDX_EXEC {
-                    if (input_len / (exec_or_url_area.width - 1)) >= 1 {
-                        println!("true");
-                        cursor_x = area.x + area_x + current_cursor
-                            - exec_or_url_area.width * (input_len / (exec_or_url_area.width - 1))
-                            + 3;
-                    }
-                    cursor_y = area
-                        .y
-                        .saturating_add(input_len / (exec_or_url_area.width - 1) + area_y);
+                    let width = exec_or_url_area.width.saturating_sub(1);
+                    let scale = ((input_len / (exec_or_url_area.width - 1) as usize)) as u16;
+                    let line_index = current_cursor / width;
+                    let column_index = current_cursor % width;
+
+                    cursor_x = area.x + area_x + column_index + scale + 1;
+                    cursor_y = area.y + area_y + line_index;
+
+                    cursor_x = cursor_x.min(area.x + exec_or_url_area.width - 1);
+                    cursor_y = cursor_y.min(area.y + exec_or_url_area.height - 1);
                 }
 
                 #[allow(clippy::cast_possible_truncation)]

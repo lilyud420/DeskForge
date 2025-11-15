@@ -214,69 +214,69 @@ impl App {
         Ok(())
     }
 
-    pub fn can_save(&self) -> bool {
-        let name = self.input[IDX_NAME].value().trim();
-        if name.is_empty() {
-            return false;
-        }
+    // pub fn can_save(&self) -> bool {
+    //     let name = self.input[IDX_NAME].value().trim();
+    //     if name.is_empty() {
+    //         return false;
+    //     }
 
-        let file_name = format!("{}.desktop", name);
+    //     let file_name = format!("{}.desktop", name);
 
-        let save_path = dirs::data_dir()
-            .unwrap()
-            .join("applications")
-            .join(&file_name);
+    //     let save_path = dirs::data_dir()
+    //         .unwrap()
+    //         .join("applications")
+    //         .join(&file_name);
 
-        if !self.edit {
-            if save_path.exists() {
-                return false;
-            }
-        } else {
-            true;
-        }
+    //     if !self.edit {
+    //         if save_path.exists() {
+    //             return false;
+    //         }
+    //     } else {
+    //         true;
+    //     }
 
-        match self.input[IDX_TYPE].value() {
-            "Link" => {
-                let url = self.input[IDX_URL].value().trim();
+    //     match self.input[IDX_TYPE].value() {
+    //         "Link" => {
+    //             let url = self.input[IDX_URL].value().trim();
 
-                if url.is_empty() {
-                    return false;
-                }
+    //             if url.is_empty() {
+    //                 return false;
+    //             }
 
-                if url.starts_with("file://") {
-                    if let Some(local_path) = url.strip_prefix("file://") {
-                        let path = Path::new(local_path);
-                        return path.exists();
-                    }
-                }
+    //             if url.starts_with("file://") {
+    //                 if let Some(local_path) = url.strip_prefix("file://") {
+    //                     let path = Path::new(local_path);
+    //                     return path.exists();
+    //                 }
+    //             }
 
-                url.starts_with("https://")
-                    || url.starts_with("http://")
-                    || url.starts_with("mailto:")
-                    || url.starts_with("smb://")
-                    || url.starts_with("trash:///")
-                    || url.starts_with("recent:///")
-            }
-            "Application" => {
-                let trimmed = self.input[IDX_EXEC].value().trim();
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                let special_path = parts.iter().any(|p| p.contains("//"));
+    //             url.starts_with("https://")
+    //                 || url.starts_with("http://")
+    //                 || url.starts_with("mailto:")
+    //                 || url.starts_with("smb://")
+    //                 || url.starts_with("trash:///")
+    //                 || url.starts_with("recent:///")
+    //         }
+    //         "Application" => {
+    //             let trimmed = self.input[IDX_EXEC].value().trim();
+    //             let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    //             let special_path = parts.iter().any(|p| p.contains("//"));
 
-                if special_path {
-                   return true; 
-                }
+    //             if special_path {
+    //                return true; 
+    //             }
 
-                if let Some(exec_raw) = parts.iter().find(|&&p| p.contains("/")) {
-                    let exec_path = Path::new(exec_raw);
+    //             if let Some(exec_raw) = parts.iter().find(|&&p| p.contains("/")) {
+    //                 let exec_path = Path::new(exec_raw);
 
-                    exec_path.exists()
-                } else {
-                    false
-                }
-            }
-            _ => true,
-        }
-    }
+    //                 exec_path.exists()
+    //             } else {
+    //                 false
+    //             }
+    //         }
+    //         _ => true,
+    //     }
+    // }
 
     pub fn validate_path(&self, input: &str, exts: &[&str], index: usize) -> (Style, String) {
         let trimmed = input.trim();
