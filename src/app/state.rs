@@ -34,6 +34,8 @@ pub struct App {
     pub checkbox_nodisplay: bool,
     pub checkbox_startupnotify: bool,
     pub checkbox_terminal: bool,
+
+    pub edit: bool,
     pub exit: bool,
 }
 
@@ -47,6 +49,7 @@ impl App {
     pub fn new(file_name: Option<String>, file_edit: bool) -> Self {
         let mut input = vec![Input::default(); NUM_BLOCK];
         let mut block_index: usize = 0;
+        let mut edit = false;
 
         input[IDX_TYPE] = Input::from("Application");
         input[IDX_CATEGORY] = Input::from("None");
@@ -59,6 +62,7 @@ impl App {
         }
 
         if file_edit {
+            edit = true;
             if let Some(name) = &file_name {
                 let path: PathBuf = dirs::data_dir()
                     .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -111,6 +115,8 @@ impl App {
             checkbox_nodisplay: false,
             checkbox_startupnotify: true,
             checkbox_terminal: false,
+
+            edit,
             exit: false,
         }
     }
@@ -160,7 +166,7 @@ impl App {
             "Link" => writeln!(file, "URL={}", self.input[IDX_URL])?,
             "Application" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
             "Directory" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
-            "Other" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
+            "Application (other)" => writeln!(file, "Exec={}", self.input[IDX_EXEC])?,
             _ => {}
         }
 
@@ -221,8 +227,12 @@ impl App {
             .join("applications")
             .join(&file_name);
 
-        if save_path.exists() {
-            return false;
+        if !self.edit {
+            if save_path.exists() {
+                return false;
+            }
+        } else {
+            true;
         }
 
         match self.input[IDX_TYPE].value() {
@@ -250,8 +260,13 @@ impl App {
             "Application" => {
                 let trimmed = self.input[IDX_EXEC].value().trim();
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                let special_path = parts.iter().any(|p| p.contains("//"));
 
-                if let Some(exec_raw) = parts.iter().find(|&&p| p.contains('/')) {
+                if special_path {
+                   return true; 
+                }
+
+                if let Some(exec_raw) = parts.iter().find(|&&p| p.contains("/")) {
                     let exec_path = Path::new(exec_raw);
 
                     exec_path.exists()
@@ -273,7 +288,7 @@ impl App {
 
         if !path.exists() {
             match self.input[IDX_TYPE].value() {
-                "Other" | "Directory" => {
+                "Application (other)" | "Directory" => {
                     return (
                         self.is_active_block_style(IDX_EXEC),
                         "- Ignored".to_string(),
@@ -377,6 +392,13 @@ impl App {
 
         if self.block_index != index {
             return (Style::default(), "".to_string());
+        }
+
+        if self.edit {
+            return (
+                Style::default().fg(Color::LightGreen),
+                " - Ignored".to_string(),
+            );
         }
 
         if trimmed.is_empty() {

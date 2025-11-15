@@ -3,6 +3,7 @@ use crate::utils::constants::*;
 
 use color_eyre::eyre::{Ok, Result};
 
+use ratatui::widgets::Wrap;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Position, Rect},
@@ -131,7 +132,7 @@ impl App {
         let required_inner = requireed_block.inner(required_area);
         let [name_area, exec_area, icon_area] = *Layout::vertical([
             Constraint::Length(3), // Name
-            Constraint::Length(3), // Exec
+            Constraint::Min(1),    // Exec
             Constraint::Length(3), // Icon
         ])
         .split(required_inner) else {
@@ -183,8 +184,14 @@ impl App {
             .add_modifier(Modifier::BOLD);
         frame.render_widget(name, name_area);
 
+        // Exec & URL block
         let type_value = self.input[IDX_TYPE].value();
-        let exec_or_url_area = exec_area;
+        let mut exec_or_url_area = Rect {
+            x: 22,
+            y: 6,
+            width: exec_area.width.max(1),
+            height: 3,
+        };
 
         match type_value {
             "Link" => {
@@ -197,8 +204,22 @@ impl App {
                 frame.render_widget(url, exec_or_url_area);
             }
 
-            // Exec block
             _ => {
+                let input_len = self.input[IDX_EXEC].value().len();
+
+                match self.block_index {
+                    IDX_EXEC => {
+                        exec_or_url_area.height =
+                            ((input_len / (exec_or_url_area.width - 1) as usize) + 3) as u16;
+                        if input_len >= (exec_or_url_area.width - 2) as usize {
+                            if exec_or_url_area.height >= 6 {
+                                exec_or_url_area.height = 6;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
                 let (exec_color, exec_status) =
                     self.validate_path(self.input[IDX_EXEC].value(), &[], IDX_EXEC);
                 let exec = Paragraph::new(self.input[IDX_EXEC].value())
@@ -208,26 +229,32 @@ impl App {
                             .title(format!("Exec{}", exec_status))
                             .border_style(exec_color),
                     )
+                    .wrap(Wrap { trim: true })
                     .add_modifier(Modifier::BOLD);
+
                 frame.render_widget(exec, exec_or_url_area);
             }
         }
 
         // Icon block
-        let (icon_style, icon_status) = self.validate_path(
-            self.input[IDX_ICON].value(),
-            &["png", "svg", "jpg"],
-            IDX_ICON,
-        );
-        let icon = Paragraph::new(self.input[IDX_ICON].value())
-            .style(icon_style)
-            .block(
-                Block::bordered()
-                    .title(format!("Icon{}", icon_status))
-                    .border_style(icon_style),
-            )
-            .add_modifier(Modifier::BOLD);
-        frame.render_widget(icon, icon_area);
+        if ((self.input[IDX_EXEC].value().len() / (exec_or_url_area.width - 1) as usize) + 3) < 4
+            || self.block_index != IDX_EXEC
+        {
+            let (icon_style, icon_status) = self.validate_path(
+                self.input[IDX_ICON].value(),
+                &["png", "svg", "jpg"],
+                IDX_ICON,
+            );
+            let icon = Paragraph::new(self.input[IDX_ICON].value())
+                .style(icon_style)
+                .block(
+                    Block::bordered()
+                        .title(format!("Icon{}", icon_status))
+                        .border_style(icon_style),
+                )
+                .add_modifier(Modifier::BOLD);
+            frame.render_widget(icon, icon_area);
+        }
 
         // Command block
         let version_style = self.is_active_block_style(IDX_VERSION);
@@ -405,15 +432,25 @@ impl App {
                 } else {
                     (0, 1)
                 };
+                let input_len = self.input[IDX_EXEC].value().len() as u16;
+                let current_cursor = self.input[self.block_index].visual_cursor() as u16;
+                let mut cursor_x = area.x + area_x + current_cursor + 1;
+                let mut cursor_y = area.y.saturating_add(area_y);
 
-                let cursor_x = area.x + area_x;
-                let cursor_y = area.y.saturating_add(area_y);
+                if self.block_index == IDX_EXEC {
+                    if (input_len / (exec_or_url_area.width - 1)) >= 1 {
+                        println!("true");
+                        cursor_x = area.x + area_x + current_cursor
+                            - exec_or_url_area.width * (input_len / (exec_or_url_area.width - 1))
+                            + 3;
+                    }
+                    cursor_y = area
+                        .y
+                        .saturating_add(input_len / (exec_or_url_area.width - 1) + area_y);
+                }
 
                 #[allow(clippy::cast_possible_truncation)]
-                frame.set_cursor_position(Position::new(
-                    cursor_x + self.input[self.block_index].visual_cursor() as u16 + 1,
-                    cursor_y,
-                ))
+                frame.set_cursor_position(Position::new(cursor_x, cursor_y))
             }
         }
     }

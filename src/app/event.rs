@@ -70,7 +70,10 @@ impl App {
                         self.next_block();
                     }
                     IDX_TYPE => {
-                        self.open_dropdown(IDX_TYPE, vec!["Application", "Link", "Directory", "Other"]);
+                        self.open_dropdown(
+                            IDX_TYPE,
+                            vec!["Application", "Application (other)", "Link", "Directory"],
+                        );
                         self.input_mode = InputMode::Insert;
                     }
 
@@ -97,7 +100,8 @@ impl App {
                             return;
                         }
                         let file_name = format!("{}.desktop", self.input[IDX_NAME].value());
-                        self.save_as_desktop(&file_name).expect("[ERROR]: Can't save!");
+                        self.save_as_desktop(&file_name)
+                            .expect("[ERROR]: Can't save!");
                         self.exit();
                     }
                     IDX_CANCEL => self.exit(),
