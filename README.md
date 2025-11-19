@@ -15,6 +15,21 @@ Options:
   -V, --version                       Print version
 ```
 
+## Keymaps
+```htpt
+Mode: NORMAL
+
+gg                                    Go to name
+G                                     Go to save
+j                                     Go down
+k                                     Go up
+dd                                    Delete line
+i                                     Insert 
+q                                     Quit
+
+Mode: INSERT
+```
+
 ## Installation
 #### Cargo (required)
 ```bash
@@ -48,7 +63,41 @@ rm -f ~/.local/bin/deskforge
 
 ![App Screenshot](https://via.placeholder.com/468x300?text=App+Screenshot+Here)
 
+## File Structure
+```htpt
+src/    
+├── app/
+│   ├── event.rs        # Handle events & key input
+│   ├── mod.rs          
+│   ├── state.rs        # App state management
+│   └── ui.rs           # UI rendering
+│
+├── utils/
+│   ├── constants.rs    # Constant declaration
+│   └── mod.rs
+│
+├── main.rs
+└── cli.rs  
+```
+## Notes
 
+- Make sure your **PATH** includes **$HOME/.local/bin**. You can add this to your shell configuration:
+  - Bash (**~/.bashrc**): 
+      ```htpt
+      export PATH="$HOME/.local/bin:$PATH"
+      ```
+  - Zsh (**~/.zshrc**):
+      ```htpt
+      export PATH="$HOME/.local/bin:$PATH"
+      ```  
+- The executable is installed at: 
+  ```htpt
+  $HOME/.local/bin/deskforge 
+  ```
+- Optional .desktop file:
+  ```htpt
+  $HOME/.local/share/applications
+  ```
 ## License
 
 [MIT](https://choosealicense.com/licenses/mit/)
