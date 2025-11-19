@@ -59,9 +59,9 @@ rm -f ~/.local/bin/deskforge
 ```
 
 
-## Screenshots
+## Screenshot
 
-![App Screenshot](https://via.placeholder.com/468x300?text=App+Screenshot+Here)
+![App Screenshot](https://raw.githubusercontent.com/lilyud420/DeskForge/refs/heads/logic/showcase/tui.png)
 
 ## File Structure
 ```htpt
