@@ -6,7 +6,14 @@ BINDIR := $(PREFIX)/bin
 
 all: build
 
-build:
+check-cargo:
+	@command -v cargo >/dev/null 2>&1 || { \
+		echo "[ERROR]: Cargo is not installed or not in PATH."; \
+		echo "Please install Rust and Cargo from https://www.rust-lang.org/tools/install"; \
+		exit 1; \
+	}
+
+build: check-cargo
 	cargo build --release
 
 install: build
@@ -18,3 +25,6 @@ install: build
 
 uninstall:
 	rm -f $(BINDIR)/$(BINARY)
+
+clean:
+	cargo clean

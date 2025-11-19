@@ -6,8 +6,9 @@ use app::App;
 use clap::Parser;
 use cli::Cli;
 use color_eyre::{Result, eyre::Ok};
+use dirs::data_dir;
 
-use std::fs::read_dir;
+use std::fs::{create_dir_all, read_dir};
 use std::process::exit;
 
 fn desktop_exists(name: Option<String>) -> bool {
@@ -18,12 +19,30 @@ fn desktop_exists(name: Option<String>) -> bool {
         return false;
     }
 
-    let path = dirs::data_dir()
-        .unwrap()
-        .join("applications")
-        .join(&file_name);
+    let data_dir = match data_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("[ERROR]: Unexpected error");
+            exit(1);
+        }
+    };
 
-    path.exists()
+    if let Err(e) = create_dir_all(&data_dir) {
+        eprintln!("[ERROR]: Cannot create data_dir {e}");
+        exit(1);
+    }
+
+    let app_dir = data_dir
+        .join("applications");
+    
+    if let Err(e) = create_dir_all(&app_dir) {
+        eprintln!("[ERROR]: Cannot create app_dir {e}");
+        exit(1);
+    }
+    
+    let file_path = app_dir.join(&file_name);
+
+    file_path.exists()
 }
 
 fn list_all_desktop_files() {
@@ -71,27 +90,25 @@ fn main() -> Result<()> {
     }
 
     match cli.new {
-        None => {},
+        None => {}
         Some(None) => {
-             let default_name = "".to_string();
-     
-             let mut terminal = ratatui::init();
-             let result = App::new(Some(default_name), false).run(&mut terminal);
-             ratatui::restore();
-             return result;
-         }
-         Some(Some(name)) => {
-             if desktop_exists(Some(name.clone())) {
-                 eprintln!("[ERROR]: File name already exists!");
-                 exit(1);
-             }
-     
-     
-             let mut terminal = ratatui::init();
-             let result = App::new(Some(name), false).run(&mut terminal);
-             ratatui::restore();
-             return result;
-         }
+            let default_name = "".to_string();
+
+            let mut terminal = ratatui::init();
+            let result = App::new(Some(default_name), false).run(&mut terminal);
+            ratatui::restore();
+            return result;
+        }
+        Some(Some(name)) => {
+            if desktop_exists(Some(name.clone())) {
+                eprintln!("[ERROR]: File name already exists!");
+                exit(1);
+            }
+            let mut terminal = ratatui::init();
+            let result = App::new(Some(name), false).run(&mut terminal);
+            ratatui::restore();
+            return result;
+        }
     }
 
     if let Some(name) = cli.edit {
