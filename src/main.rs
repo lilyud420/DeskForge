@@ -3,7 +3,7 @@ mod cli;
 mod utils;
 
 use app::App;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::Cli;
 use color_eyre::{Result, eyre::Ok};
 use dirs::data_dir;
@@ -32,14 +32,13 @@ fn desktop_exists(name: Option<String>) -> bool {
         exit(1);
     }
 
-    let app_dir = data_dir
-        .join("applications");
-    
+    let app_dir = data_dir.join("applications");
+
     if let Err(e) = create_dir_all(&app_dir) {
         eprintln!("[ERROR]: Cannot create app_dir {e}");
         exit(1);
     }
-    
+
     let file_path = app_dir.join(&file_name);
 
     file_path.exists()
@@ -135,7 +134,8 @@ fn main() -> Result<()> {
         ratatui::restore();
         return result;
     } else {
-        eprintln!("[WARNING]: Please enter a file name!");
+        eprintln!("[WARNING]: Wrong command!");
+        Cli::command().print_help().unwrap();
         exit(1);
     }
 }

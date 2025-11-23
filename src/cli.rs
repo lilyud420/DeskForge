@@ -4,7 +4,7 @@ use clap::Parser;
 #[command(
     name = "DeskForge",
     version = "1.0",
-    about = "A launcher creation tool",
+    about = "Deskforge - A launcher creation tool",
     override_usage = "deskforge [COMMANDS] [OPTIONS]"
 )]
 pub struct Cli {
