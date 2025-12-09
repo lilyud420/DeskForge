@@ -1,6 +1,9 @@
 mod app;
 mod cli;
+mod commands;
 mod utils;
+
+use crate::{commands::edit::*, commands::list::list_all_desktop_files, commands::new::*};
 
 use app::App;
 use clap::{CommandFactory, Parser};
@@ -8,7 +11,7 @@ use cli::Cli;
 use color_eyre::{Result, eyre::Ok};
 use dirs::data_dir;
 
-use std::fs::{create_dir_all, read_dir};
+use std::fs::create_dir_all;
 use std::process::exit;
 
 fn desktop_exists(name: Option<String>) -> bool {
@@ -44,41 +47,6 @@ fn desktop_exists(name: Option<String>) -> bool {
     file_path.exists()
 }
 
-fn list_all_desktop_files() {
-    let mut counter: usize = 0;
-    let dir = dirs::data_dir().unwrap().join("applications");
-
-    if !dir.exists() {
-        eprintln!("[ERROR]: No applications directory found!");
-        return;
-    }
-
-    let entries = match read_dir(&dir) {
-        std::result::Result::Ok(e) => e,
-        Err(err) => {
-            eprintln!("[ERROR]: Failed to read directory: {}", err);
-            return;
-        }
-    };
-
-    println!("[DESKFORGE]");
-    for entry in entries {
-        if let std::result::Result::Ok(entry) = entry {
-            let path = entry.path();
-
-            if let Some(ext) = path.extension() {
-                if ext == "desktop" {
-                    if let Some(name) = path.file_name() {
-                        counter += 1;
-                        println!("{}. {}", counter, name.to_string_lossy());
-                    }
-                }
-            }
-        }
-    }
-    println!("Total: {}", counter);
-}
-
 fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
@@ -91,22 +59,14 @@ fn main() -> Result<()> {
     match cli.new {
         None => {}
         Some(None) => {
-            let default_name = "".to_string();
-
-            let mut terminal = ratatui::init();
-            let result = App::new(Some(default_name), false).run(&mut terminal);
-            ratatui::restore();
-            return result;
+            return new_default_file();
         }
         Some(Some(name)) => {
             if desktop_exists(Some(name.clone())) {
                 eprintln!("[ERROR]: File name already exists!");
                 exit(1);
             }
-            let mut terminal = ratatui::init();
-            let result = App::new(Some(name), false).run(&mut terminal);
-            ratatui::restore();
-            return result;
+            return new_file(Some(name));
         }
     }
 
@@ -119,20 +79,12 @@ fn main() -> Result<()> {
             format!("{}.desktop", trimmed)
         };
 
-        let path = dirs::data_dir()
-            .unwrap()
-            .join("applications")
-            .join(&file_name);
-
-        if !path.exists() {
+        if edit_err(&file_name) {
             eprintln!("[ERROR]: File doesn't exists!");
             exit(1)
         }
 
-        let mut terminal = ratatui::init();
-        let result = App::new(Some(file_name), true).run(&mut terminal);
-        ratatui::restore();
-        return result;
+        return edit(file_name);
     } else {
         eprintln!("[WARNING]: Wrong command!");
         Cli::command().print_help().unwrap();
