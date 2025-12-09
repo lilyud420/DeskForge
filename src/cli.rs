@@ -15,6 +15,10 @@ pub struct Cli {
     /// Edit an existing launcher
     #[arg(short = 'e', long = "edit", value_name = "REQUIRED: FILE_NAME", num_args= 0..=1)]
     pub edit: Option<String>,
+    
+    /// Remove an exisiting launcher
+    #[arg(short = 'r', long = "remove")]
+    pub remove: Option<String>,
 
     /// List all exisiting launcher
     #[arg(short = 'l', long = "list")]

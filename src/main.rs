@@ -3,6 +3,7 @@ mod cli;
 mod commands;
 mod utils;
 
+use crate::commands::remove::{remove, remove_err};
 use crate::{commands::edit::*, commands::list::list_all_desktop_files, commands::new::*};
 
 use app::App;
@@ -54,6 +55,29 @@ fn main() -> Result<()> {
     if cli.list {
         list_all_desktop_files();
         return Ok(());
+    }
+
+    match cli.remove {
+        None => {
+            eprintln!("[ERROR]: Please type a file name!");
+        }
+        Some(name) => {
+            let trimmed = name.trim();
+
+            let file_name = if trimmed.ends_with(".desktop") {
+                trimmed.to_string()
+            } else {
+                format!("{}.desktop", trimmed)
+            };
+
+            if remove_err(&file_name) {
+                eprintln!("[ERROR]: File doesn't exists!");
+                exit(1)
+            }
+            
+            remove(&file_name);
+            return Ok(());
+        }
     }
 
     match cli.new {
