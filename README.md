@@ -10,6 +10,7 @@ Usage: deskforge [COMMANDS] [OPTIONS]
 Options:
   -n, --new [<OPTIONAL: FILE_NAME>]   Create a new launcher
   -e, --edit [<REQUIRED: FILE_NAME>]  Edit an existing launcher
+  -r, --remove [<REQUIRED: FILE_NAME>]  Remove an exisiting launcher
   -l, --list                          List all exisiting launcher
   -h, --help                          Print help
   -V, --version                       Print version
@@ -71,6 +72,13 @@ src/
 │   ├── mod.rs          
 │   ├── state.rs        # App state management
 │   └── ui.rs           # UI rendering
+│
+├── commands/           # CLI commands
+│   ├── edit.rs
+│   ├── list.rs
+│   ├── mod.rs
+│   ├── new.rs 
+│   └── remove.rs
 │
 ├── utils/
 │   ├── constants.rs    # Constant declaration
