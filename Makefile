@@ -23,8 +23,22 @@ install: build
 	fi
 	install -m 755 target/release/$(BINARY) $(BINDIR)/$(BINARY)
 
+
 uninstall:
-	rm -f $(BINDIR)/$(BINARY)
+	@if [ -z "$(BINARY)" ] || [ -z "$(BINDIR)" ]; then \
+		echo "BINARY='$(BINARY)' BINDIR='$(BINDIR)'"; \
+		echo "[ERROR] BINARY or BINDIR is empty. Aborting uninstall."; \
+		exit 1; \
+	fi
+	@if [ "$(BINDIR)" = "/" ] || [ "$(BINDIR)" = "." ]; then \
+		echo "[ERROR] BINDIR is a dangerous path: '$(BINDIR)'. Aborting."; \
+		exit 1; \
+	fi
+	@if [ ! -e "$(BINDIR)/$(BINARY)" ]; then \
+		echo "[INFO] $(BINDIR)/$(BINARY) does not exist. Nothing to uninstall."; \
+		exit 0; \
+	fi
+	rm -f -- "$(BINDIR)/$(BINARY)"
 
 clean:
 	cargo clean
